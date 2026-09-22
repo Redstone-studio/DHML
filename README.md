@@ -1,6 +1,7 @@
-# DHML
+# Redstone-Launcher
 
-PyQt6 写的 Minecraft 启动器。自己用的，顺手开源。
+
+一个PyQt6 写的 Minecraft 启动器。自己用的，顺手开源。
 
 现在能扫本地的 `.minecraft/versions` 并把它们列出来，界面是深色的。
 启动游戏、下载版本这些还没做。
