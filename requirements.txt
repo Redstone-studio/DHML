@@ -1,0 +1,5 @@
+# 运行时依赖
+PyQt6>=6.6
+
+# 打包（本地出 exe 时才需要，CI 里由 workflow 单独安装）
+# pyinstaller>=6.0

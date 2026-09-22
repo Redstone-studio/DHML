@@ -1,6 +1,9 @@
 """账户管理（%APPDATA%/MCLuncher/accounts.json）
 
 目前只有离线验证可用；正版 / 第三方验证只占了 UI 的位置。
+
+文案约定：账户类型的显示名走 type_label()（内部过 tr()），
+不要在别处缓存这个字典 —— 那样语言切换后它不会更新。
 """
 
 import hashlib
@@ -8,6 +11,20 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+
+from core.i18n import tr
+
+# 账户类型的**源文案**（中文即 key，见 core/i18n.py）
+_TYPE_LABELS = {
+    "offline": "离线验证",
+    "microsoft": "正版验证",
+    "thirdparty": "第三方验证",
+}  # noqa: i18n  —— 这些中文在 type_label() 里过 tr()
+
+
+def type_label(key: str) -> str:
+    """账户类型的显示名（每次调用都过 tr()，所以跟着语言走）"""
+    return tr(_TYPE_LABELS.get(key, "未知"))
 
 
 def get_config_dir() -> Path:
@@ -27,19 +44,6 @@ def get_config_dir() -> Path:
 
 ACCOUNTS_FILE = get_config_dir() / "accounts.json"
 
-# 账户类型的显示名
-TYPE_LABELS = {
-    "offline": "离线验证",
-    "microsoft": "正版验证",
-    "thirdparty": "第三方验证",
-}
-
-TYPE_ICONS = {
-    "offline": "✂",
-    "microsoft": "🛡",
-    "thirdparty": "🔗",
-}
-
 
 class AccountManager:
     def __init__(self):
@@ -50,11 +54,12 @@ class AccountManager:
     def load(self):
         if ACCOUNTS_FILE.exists():
             try:
-                data = json.loads(ACCOUNTS_FILE.read_text(encoding="utf-8"))
+                # 读字节，让 json 自己处理 BOM（见 core/config.py 里同样的说明）
+                data = json.loads(ACCOUNTS_FILE.read_bytes())
                 self.accounts = data.get("accounts", [])
                 self.current = data.get("current")
             except Exception as e:
-                print(f"[Accounts] 读取失败: {e}")
+                print(f"[Accounts] load failed: {e}")
                 self.accounts, self.current = [], None
 
     def save(self):

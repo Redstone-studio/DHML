@@ -34,6 +34,7 @@ DEFAULT_CONFIG = {
     "max_memory": 2048,       # MB
     "min_memory": 512,
     "close_on_launch": False, # 启动后关闭启动器
+    "language": "zh_CN",      # 界面语言，见 core/i18n.py
 }
 
 
@@ -47,7 +48,9 @@ class Config:
     def load(self):
         if CONFIG_FILE.exists():
             try:
-                loaded = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                # 读字节：让 json 自己处理 BOM。手动存过 config.json 的话，
+                # 编辑器可能加了 BOM，用 encoding="utf-8" 读会直接抛异常
+                loaded = json.loads(CONFIG_FILE.read_bytes())
                 if isinstance(loaded, dict):
                     # 和默认值合并，防止旧版本配置缺字段
                     self.data.update({k: loaded[k] for k in DEFAULT_CONFIG if k in loaded})
