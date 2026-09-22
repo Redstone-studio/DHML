@@ -33,7 +33,7 @@ class MainWindow(QMainWindow):
         self.account_list.add_requested.connect(self.open_new_account_dialog)
         self.account_list.account_selected.connect(self.on_account_changed)
 
-       # ---------- 4. 页面堆栈 ----------
+        # ---------- 4. 页面堆栈 ----------
         self.stack = QStackedWidget()
         self.pages = {
             "home": HomePage(),
@@ -46,7 +46,7 @@ class MainWindow(QMainWindow):
         # ---------- 4b. 设置页改了配置 → 首页刷新 ----------
         self.pages["settings"].config_changed.connect(self._on_config_changed)
 
-        # ---------- 5. 加入布局（顺序：侧边栏 | 账户列表 | 内容） ----------
+        # ---------- 5. 加入布局（侧边栏 | 账户列表 | 内容） ----------
         layout.addWidget(self.sidebar)
         layout.addWidget(self.account_list)
         layout.addWidget(self.stack, 1)
@@ -82,3 +82,9 @@ class MainWindow(QMainWindow):
         home = self.pages["home"]
         if hasattr(home, "username_input"):
             home.username_input.setText(name)
+
+    def _on_config_changed(self):
+        """设置页改了 MC 目录等配置后，让首页重新扫描版本"""
+        home = self.pages["home"]
+        if hasattr(home, "reset_scanner"):
+            home.reset_scanner()
