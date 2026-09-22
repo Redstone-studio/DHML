@@ -6,4 +6,4 @@ tag 早就到 v0.0.5-alpha 了，界面上显示的版本号是假的。）
 """
 
 APP_NAME = "MC Launcher"
-APP_VERSION = "v0.1.0-dev"
+APP_VERSION = "v0.1.2-dev"
