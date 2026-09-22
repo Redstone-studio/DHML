@@ -179,3 +179,55 @@ QDialog {
 #RefreshButton:pressed {
     background-color: #232428;
 }
+/* 设置页 */
+#SectionTitle {
+    font-size: 14px;
+    font-weight: bold;
+    color: #7ed957;
+    padding-top: 10px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #2a2c30;
+}
+
+QSpinBox {
+    background-color: #2a2c30;
+    border: 1px solid #3a3c40;
+    border-radius: 6px;
+    padding: 4px 8px;
+    color: #e6e6e6;
+    min-width: 90px;
+}
+QSpinBox:hover {
+    border-color: #7ed957;
+}
+
+QCheckBox {
+    color: #d0d0d0;
+    padding: 4px;
+}
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid #3a3c40;
+    background-color: #2a2c30;
+}
+QCheckBox::indicator:checked {
+    background-color: #3fa34d;
+    border-color: #3fa34d;
+}
+
+QPushButton {
+    background-color: #2a2c30;
+    border: 1px solid #3a3c40;
+    border-radius: 6px;
+    padding: 6px 14px;
+    color: #d0d0d0;
+}
+QPushButton:hover {
+    background-color: #34363a;
+    border-color: #7ed957;
+}
+QPushButton:pressed {
+    background-color: #232428;
+}
