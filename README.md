@@ -41,22 +41,6 @@ ui/                         界面
 assets/styles/dark.qss      深色主题（调色板在文件顶部）
 ```
 
-## 打包
-
-GitHub Actions 的构建命令不用改：
-
-```
-pyinstaller --noconfirm --windowed --name MCLuncher --add-data "assets;assets" main.py
-```
-
-`core/resources.py` 会用 `sys._MEIPASS` 定位 `assets/`，所以打包后样式能正常加载。
-
-> ⚠️ 历史坑：0.0.x 系列的 `load_styles()` 用的是相对路径
-> `open("assets/styles/dark.qss")`。PyInstaller 6.x 会把 `--add-data` 的内容放进
-> `_internal/` 子目录，而双击 exe 时的工作目录是 exe 所在目录 —— 于是它永远找不到
-> 那个文件，`FileNotFoundError` 又被 `except: pass` 吞掉，结果**五个发行版的界面
-> 全都没有样式**。现在异常会打印出来，不会再静默失败。
-
 ## 还没做
 
 - `v0.2.0-alpha` 拼 Java 命令并真正启动游戏
