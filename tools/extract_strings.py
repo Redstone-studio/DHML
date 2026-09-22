@@ -31,6 +31,11 @@ SCAN_FILES = ("main.py",)
 
 CJK = re.compile(r"[\u4e00-\u9fff]")
 
+# 这些文案**故意不翻译**，别报"漏翻"。
+# 语言名按惯例用该语言自己写（中文写"简体中文"、英文写"English"），
+# 翻译了反而让用户找不到自己的语言。
+NO_TRANSLATE = {"简体中文"}
+
 # 这些调用的字符串参数算"走了文案系统"，不算漏网。
 # 后面几个是本项目自己的辅助方法：_card 是设置页建卡片用的，
 # 它内部用 self.label() 把标题登记进了文案系统。
@@ -242,8 +247,9 @@ def main() -> int:
             print(f"   {rel}:{line}  {text}")
         print()
 
-    # 其它语言文件里的 key 必须在源码里找得到 ——
-    # key 打错一个字就会静默退回中文，非常难发现，所以专门查一遍
+    # 其它语言文件的两项检查：
+    #   - key 在源码里找不到 → 多半是打错了（打错会静默退回中文，很难发现）
+    #   - 源码里有、译文里没有 → 漏翻（会退回中文显示）
     for other in sorted(JSON_PATH.parent.glob("*.json")):
         if other == JSON_PATH:
             continue
@@ -252,10 +258,20 @@ def main() -> int:
         except (OSError, ValueError) as e:
             print(f"== {other.name} 读不了: {e} ==")
             continue
+
         orphans = [key for key in table if key not in found]
+        untranslated = [
+            key for key in found if key not in table and key not in NO_TRANSLATE
+        ]
+
         if orphans:
             print(f"== {other.name} 里有 {len(orphans)} 个 key 在源码里找不到（打错了？） ==")
             for key in orphans:
+                print(f"   {key}")
+            print()
+        if untranslated:
+            print(f"== {other.name} 还差 {len(untranslated)} 条没翻（会退回中文） ==")
+            for key in untranslated:
                 print(f"   {key}")
             print()
 

@@ -1,0 +1,734 @@
+/* ============================================================================
+   MC Launcher 界面样式（模板）
+
+   这里的颜色**不是硬编码**，而是 @变量@ —— 由 core/theme.py 在加载时替换：
+
+     core/theme.py           定义 dark / light 两套调色板
+     ui/main_window.py       读这个文件 → 替换变量 → setStyleSheet()
+
+   所以：
+   - 加新的样式规则时，颜色一律用 @变量@，不要写 #rrggbb
+     （写死了浅色主题就会漏掉那条规则）
+   - 换主题、改强调色都只动 core/theme.py，这个文件不用改
+   - @ICONS@ 由 main_window.py 替换成图标目录的绝对路径
+
+   变量清单见 core/theme.py 的 DARK / LIGHT 字典，名字是自解释的：
+     bg_window / bg_page / bg_card / bg_control ...   背景层次
+     text / text_dim / text_faint / text_disabled ... 文字层次
+     accent / accent_fill / accent_bg / accent_border 强调色一族
+     warn / danger / pack_*                           语义色
+   ============================================================================ */
+
+QWidget {
+    background-color: @bg_page@;
+    color: @text@;
+    font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei",
+                 "Segoe UI Symbol", "Segoe UI Emoji", sans-serif;
+    font-size: 14px;
+}
+
+/* 见文件顶部说明 1)：不加这条，所有文字都会带一块自己的底色 */
+QLabel {
+    background-color: transparent;
+}
+
+/* 同理：勾选框和单选框自己也是 QWidget，会带上页面底色。
+   放在卡片上时（设置页的"启动游戏后关闭启动器"）就会露出一块深色。 */
+QCheckBox,
+QRadioButton {
+    background-color: transparent;
+}
+
+QMainWindow, #Root {
+    background-color: @bg_window@;
+}
+
+QToolTip {
+    background-color: @bg_control@;
+    color: @text@;
+    border: 1px solid @border_control@;
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+
+/* ============================ 侧边栏 ============================ */
+
+#Sidebar {
+    background-color: @bg_sidebar@;
+    border-right: 1px solid @border@;
+}
+
+#SidebarBrand {
+    color: @accent@;
+    font-size: 16px;
+    font-weight: bold;
+    padding: 0 4px;
+}
+
+#NavButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: left;
+    color: @text_dim@;
+    font-size: 14px;
+}
+#NavButton:hover {
+    background-color: @bg_card@;
+    color: @text@;
+}
+#NavButton:checked {
+    background-color: @bg_elevated@;
+    color: @accent@;
+    font-weight: bold;
+}
+
+#SidebarSectionLabel {
+    color: @text_faint@;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 0 4px;
+}
+
+#SidebarVersion {
+    color: @text_disabled@;
+    font-size: 11px;
+}
+
+/* 侧边栏底部的"当前档案"卡片 */
+#AccountChip {
+    background-color: @bg_card@;
+    border: 1px solid @border@;
+    border-radius: 10px;
+}
+#AccountChip:hover {
+    background-color: @bg_elevated@;
+    border-color: @border_control@;
+}
+#AccountChipName {
+    color: @text@;
+    font-weight: bold;
+    font-size: 13px;
+}
+#AccountChipType {
+    color: @text_faint@;
+    font-size: 11px;
+}
+#AccountAvatar {
+    background-color: @avatar_bg@;
+    color: @accent_text_strong@;
+    border-radius: 16px;
+    font-size: 15px;
+    font-weight: bold;
+}
+
+/* ============================ 页面通用 ============================ */
+
+#PageTitle {
+    color: @text_bright@;
+    font-size: 24px;
+    font-weight: bold;
+}
+
+#PageSubtitle {
+    color: @text_faint@;
+    font-size: 13px;
+}
+
+#SectionTitle {
+    color: @text@;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+#FieldLabel {
+    color: @text_dim@;
+    font-size: 13px;
+}
+
+#HintText {
+    color: @text_faint@;
+    font-size: 12px;
+}
+
+#EmptyState {
+    color: @text_faint@;
+    font-size: 13px;
+}
+
+/* 卡片 */
+#Card {
+    background-color: @bg_card@;
+    border: 1px solid @border@;
+    border-radius: 12px;
+}
+
+/* ============================ 按钮 ============================ */
+
+QPushButton {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 8px;
+    padding: 7px 16px;
+    color: @text_secondary@;
+    font-size: 13px;
+}
+QPushButton:hover {
+    background-color: @bg_hover@;
+    border-color: @border_hover@;
+    color: @text_bright@;
+}
+QPushButton:pressed {
+    background-color: @bg_pressed@;
+}
+QPushButton:disabled {
+    background-color: @bg_card@;
+    border-color: @border_disabled@;
+    color: @text_disabled@;
+}
+
+/* 主操作按钮（绿色） */
+#PrimaryButton {
+    background-color: @accent_fill@;
+    border: 1px solid @accent_fill_hover@;
+    color: @on_accent@;
+    font-weight: bold;
+}
+#PrimaryButton:hover {
+    background-color: @accent_fill_hover@;
+    border-color: @accent@;
+}
+#PrimaryButton:pressed {
+    background-color: @accent_fill_pressed@;
+}
+#PrimaryButton:disabled {
+    background-color: @accent_bg_disabled@;
+    border-color: @accent_border_disabled@;
+    color: @accent_text_disabled@;
+}
+
+/* 危险操作（删除） */
+#DangerButton {
+    background-color: transparent;
+    border: 1px solid @danger_border@;
+    color: @danger@;
+}
+#DangerButton:hover {
+    background-color: @danger_bg_hover@;
+    border-color: @danger@;
+    color: @danger_hover@;
+}
+#DangerButton:disabled {
+    border-color: @border_disabled@;
+    color: @text_disabled@;
+}
+
+/* 无边框的图标按钮 */
+#IconButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 0;
+    color: @text_dim@;
+    font-size: 16px;
+}
+#IconButton:hover {
+    background-color: @bg_control@;
+    color: @accent@;
+}
+#IconButton:pressed {
+    background-color: @bg_card@;
+}
+
+/* 首页的启动按钮 */
+#LaunchButton {
+    background-color: @accent_fill@;
+    border: none;
+    border-radius: 10px;
+    color: @on_accent@;
+    font-size: 16px;
+    font-weight: bold;
+}
+#LaunchButton:hover {
+    background-color: @accent_fill_hover@;
+}
+#LaunchButton:pressed {
+    background-color: @accent_fill_pressed@;
+}
+#LaunchButton:disabled {
+    background-color: @bg_elevated@;
+    color: @text_disabled@;
+}
+
+/* ============================ 输入控件 ============================ */
+
+QLineEdit {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 8px;
+    padding: 7px 10px;
+    color: @text@;
+    selection-background-color: @select_bg@;
+    selection-color: @on_accent@;
+}
+QLineEdit:hover {
+    border-color: @border_hover@;
+}
+QLineEdit:focus {
+    border-color: @accent@;
+}
+QLineEdit:disabled {
+    background-color: @bg_disabled@;
+    color: @text_faint@;
+    border-color: @border_disabled@;
+}
+
+/* ---- 数字框：上下箭头用真图标 ---- */
+QSpinBox {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 8px;
+    padding: 6px 6px 6px 10px;
+    color: @text@;
+    min-width: 96px;
+    selection-background-color: @select_bg@;
+}
+QSpinBox:hover {
+    border-color: @border_hover@;
+}
+QSpinBox:focus {
+    border-color: @accent@;
+}
+QSpinBox:disabled {
+    background-color: @bg_disabled@;
+    color: @text_faint@;
+    border-color: @border_disabled@;
+}
+QSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 22px;
+    margin: 2px 3px 0 0;
+    border: none;
+    background: transparent;
+}
+QSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 22px;
+    margin: 0 3px 2px 0;
+    border: none;
+    background: transparent;
+}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background-color: @border_control@;
+    border-radius: 4px;
+}
+QSpinBox::up-arrow {
+    image: url(@ICONS@/chevron-up.svg);
+    width: 11px;
+    height: 11px;
+}
+QSpinBox::down-arrow {
+    image: url(@ICONS@/chevron-down.svg);
+    width: 11px;
+    height: 11px;
+}
+
+/* ---- 下拉框 ---- */
+QComboBox {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 8px;
+    padding: 7px 10px;
+    color: @text@;
+    min-height: 20px;
+}
+QComboBox:hover {
+    border-color: @border_hover@;
+}
+QComboBox:focus {
+    border-color: @accent@;
+}
+QComboBox:disabled {
+    background-color: @bg_disabled@;
+    color: @text_faint@;
+    border-color: @border_disabled@;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 30px;
+    border: none;
+    background: transparent;
+}
+QComboBox::down-arrow {
+    image: url(@ICONS@/chevron-down.svg);
+    width: 12px;
+    height: 12px;
+}
+QComboBox QAbstractItemView {
+    background-color: @bg_elevated@;
+    border: 1px solid @border_control@;
+    border-radius: 8px;
+    padding: 4px;
+    color: @text@;
+    outline: none;
+    selection-background-color: @accent_selected_bg@;
+    selection-color: @accent_text_strong@;
+}
+QComboBox QAbstractItemView::item {
+    padding: 6px 8px;
+    border-radius: 6px;
+    min-height: 22px;
+}
+QComboBox QAbstractItemView::separator {
+    height: 1px;
+    background-color: @border_control@;
+    margin: 4px 6px;
+}
+
+/* ---- 勾选框 / 单选框：统一成 PCL2 那种打勾样式 ---- */
+QCheckBox {
+    color: @text_secondary@;
+    spacing: 9px;
+    padding: 3px;
+}
+QCheckBox:hover {
+    color: @text_bright@;
+}
+
+QCheckBox::indicator,
+QRadioButton::indicator {
+    width: 17px;
+    height: 17px;
+    border-radius: 4px;
+    border: 1px solid @border_hover@;
+    background-color: @bg_check@;
+}
+QCheckBox::indicator:hover,
+QRadioButton::indicator:hover {
+    border-color: @accent@;
+}
+QCheckBox::indicator:checked,
+QRadioButton::indicator:checked {
+    background-color: @accent_fill@;
+    border-color: @accent@;
+    image: url(@ICONS@/check.svg);
+}
+QCheckBox::indicator:disabled,
+QRadioButton::indicator:disabled {
+    border-color: @border_disabled@;
+    background-color: @bg_disabled@;
+}
+
+QRadioButton {
+    color: @text_secondary@;
+    spacing: 9px;
+    padding: 9px 11px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+}
+QRadioButton:hover {
+    background-color: @bg_elevated@;
+}
+QRadioButton:checked {
+    background-color: @accent_bg@;
+    border-color: @accent_border@;
+    color: @accent_text_strong@;
+    font-weight: bold;
+}
+QRadioButton:disabled {
+    color: @text_disabled@;
+}
+
+/* ============================ 列表 / 表格 ============================ */
+
+QListWidget {
+    background-color: transparent;
+    border: none;
+    outline: none;
+    color: @text_secondary@;
+}
+QListWidget::item {
+    padding: 9px 10px;
+    border-radius: 8px;
+    margin-bottom: 2px;
+}
+QListWidget::item:hover {
+    background-color: @bg_elevated@;
+}
+QListWidget::item:selected {
+    background-color: @bg_elevated@;
+    color: @accent@;
+}
+
+QTableWidget {
+    background-color: transparent;
+    border: none;
+    gridline-color: transparent;
+    outline: none;
+    color: @text_secondary@;
+    selection-background-color: @bg_elevated@;
+    selection-color: @accent@;
+}
+QTableWidget::item {
+    padding: 7px 8px;
+    border: none;
+}
+QTableWidget::item:hover {
+    background-color: @bg_card@;
+}
+QTableWidget::item:selected {
+    background-color: @bg_elevated@;
+    color: @accent@;
+}
+
+QHeaderView::section {
+    background-color: transparent;
+    color: @text_faint@;
+    border: none;
+    border-bottom: 1px solid @border@;
+    padding: 8px;
+    font-size: 12px;
+    font-weight: bold;
+}
+QTableCornerButton::section {
+    background-color: transparent;
+    border: none;
+}
+
+/* ============================ 滚动条 ============================ */
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 2px;
+}
+QScrollBar::handle:vertical {
+    background-color: @border_control@;
+    border-radius: 5px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover {
+    background-color: @border_hover@;
+}
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 2px;
+}
+QScrollBar::handle:horizontal {
+    background-color: @border_control@;
+    border-radius: 5px;
+    min-width: 30px;
+}
+QScrollBar::handle:horizontal:hover {
+    background-color: @border_hover@;
+}
+QScrollBar::add-line, QScrollBar::sub-line {
+    height: 0;
+    width: 0;
+    background: none;
+    border: none;
+}
+QScrollBar::add-page, QScrollBar::sub-page {
+    background: none;
+}
+
+/* ============================ 提示条 / 徽章 ============================ */
+
+#WarningBanner {
+    background-color: @warn_bg@;
+    border: 1px solid @warn_border@;
+    border-radius: 8px;
+    color: @warn@;
+    padding: 9px 12px;
+    font-size: 12px;
+}
+
+#ErrorBanner {
+    background-color: @danger_bg@;
+    border: 1px solid @danger_border_strong@;
+    border-radius: 8px;
+    color: @danger@;
+    padding: 9px 12px;
+    font-size: 12px;
+}
+
+#Badge {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 6px;
+    color: @text_dim@;
+    padding: 3px 9px;
+    font-size: 12px;
+}
+#BadgeAccent {
+    background-color: @accent_bg@;
+    border: 1px solid @accent_border@;
+    border-radius: 6px;
+    color: @accent_text@;
+    padding: 3px 9px;
+    font-size: 12px;
+}
+#BadgeWarn {
+    background-color: @warn_bg@;
+    border: 1px solid @warn_border@;
+    border-radius: 6px;
+    color: @warn@;
+    padding: 3px 9px;
+    font-size: 12px;
+}
+
+/* ==================== 版本列表（卡片式，参考 PCL2） ====================
+   从 QTableWidget 换过来的原因：表格选中一行时，每个单元格各画各的选中背景，
+   看起来高亮被切成好几段。卡片列表整行连续高亮，还能一行放"名称 + 元信息"。 */
+
+#VersionList {
+    background-color: transparent;
+    border: none;
+    outline: none;
+}
+/* 关键：item 不能留 margin / 圆角断层，否则高亮又会断开 */
+#VersionList::item {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    margin: 2px 0;
+    padding: 0;
+}
+#VersionList::item:hover {
+    background-color: @bg_elevated@;
+}
+#VersionList::item:selected {
+    background-color: @accent_bg@;
+    border-color: @accent_border@;
+}
+
+#VersionGroupTitle {
+    color: @text_faint@;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 14px 0 6px 10px;
+}
+#VersionRowName {
+    color: @text@;
+    font-size: 14px;
+    font-weight: bold;
+}
+#VersionRowMeta {
+    color: @text_faint@;
+    font-size: 12px;
+}
+
+#BadgeVanilla {
+    background-color: @accent_bg@;
+    border: 1px solid @accent_border@;
+    border-radius: 10px;
+    color: @accent_text@;
+    font-size: 13px;
+    font-weight: bold;
+}
+#BadgeLoader {
+    background-color: @warn_bg@;
+    border: 1px solid @warn_border@;
+    border-radius: 10px;
+    color: @warn@;
+    font-size: 13px;
+    font-weight: bold;
+}
+#BadgePack {
+    background-color: @pack_bg@;
+    border: 1px solid @pack_border@;
+    border-radius: 10px;
+    color: @pack_text@;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+/* ==================== 账户列表（和版本列表同款卡片行） ==================== */
+
+#AccountList {
+    background-color: transparent;
+    border: none;
+    outline: none;
+}
+#AccountList::item {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    margin: 2px 0;
+    padding: 0;
+}
+/* 账户列表的"选中"用中性灰，绿色专门留给"当前档案"。
+   否则绿色填充（选中）比那根细竖条（当前）显眼得多，
+   会让人误以为选中的那行才是当前档案。
+   （版本页没有"当前"这个概念，所以那边选中有权用绿色。） */
+#AccountList::item:hover {
+    background-color: @bg_elevated@;
+}
+#AccountList::item:selected {
+    background-color: @bg_hover@;
+    border-color: @border_selected@;
+}
+#AccountRowName {
+    color: @text@;
+    font-size: 14px;
+    font-weight: bold;
+}
+/* 当前档案：名字用强调色，配左边那根竖条。
+   不用右侧徽章 —— 徽章飘在行尾离内容很远，看着很散。 */
+#AccountRowNameCurrent {
+    color: @accent@;
+    font-size: 14px;
+    font-weight: bold;
+}
+#AccountRowMeta {
+    color: @text_faint@;
+    font-size: 12px;
+}
+/* 当前档案的左侧竖条。非当前的行也用同样宽度占位（只是透明），
+   这样两种行的文字起始位置能对齐。 */
+#AccountRowAccent {
+    background-color: @accent@;
+    border-radius: 2px;
+}
+#AccountRowAccentOff {
+    background-color: transparent;
+}
+
+/* ==================== 可滚动页面 ====================
+   设置页的内容比窗口高时必须有滚动条，否则卡片会被压扁、底部被切掉。
+   QScrollArea 是 QFrame，会继承全局 QWidget 的底色，这里设成透明，
+   让它露出页面自己的背景。 */
+
+QScrollArea {
+    background-color: transparent;
+    border: none;
+}
+QScrollArea > QWidget > QWidget {
+    background-color: transparent;
+}
+
+/* ============================ 对话框 ============================ */
+
+QDialog {
+    background-color: @bg_page@;
+}
+
+#DialogTitle {
+    color: @text_bright@;
+    font-size: 16px;
+    font-weight: bold;
+    padding-bottom: 10px;
+    border-bottom: 1px solid @border@;
+}
+
+QMessageBox {
+    background-color: @bg_page@;
+}
+QMessageBox QLabel {
+    color: @text@;
+}

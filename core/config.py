@@ -35,6 +35,8 @@ DEFAULT_CONFIG = {
     "min_memory": 512,
     "close_on_launch": False, # 启动后关闭启动器
     "language": "zh_CN",      # 界面语言，见 core/i18n.py
+    "theme": "system",        # system / dark / light，见 core/theme.py
+    "accent_color": "",       # 空 = 用主题自带的强调色；否则 "#rrggbb"
 }
 
 

@@ -1,4 +1,7 @@
-"""设置页：语言 / 游戏目录 / Java / 内存 / 其他
+"""设置页：游戏目录 / Java / 内存 / 其他
+
+主题和界面语言搬到「个性化」页了 —— "看着舒服"（颜色、语言）和"游戏怎么跑"
+（目录、Java、内存）不是一类东西，混在一页里只会越长越乱。
 
 修掉的历史问题：
 1. 内存的"最小"和"最大"以前各管各的取值范围，可以设成 min > max，
@@ -7,20 +10,16 @@
 2. 以前 QSpinBox 每动一格就 config.set() → save()，按住上下箭头连点会写
    几十次 config.json。现在加 400ms 防抖，而且一次 save() 写完两个值。
 3. Java 那行 placeholder 写了"（暂未实现）"、右边又挂一个标签，一句话说了两遍。
-
-文案：静态文字走 self.label()/self.button()/self.bind()；
-目录提示是生成的，在 retranslate() 里重建。
 """
 
 from pathlib import Path
 
 from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QMessageBox, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget
 )
 
-from core import i18n
 from core.config import config
 from core.i18n import tr
 from core.versions import default_minecraft_dir
@@ -29,7 +28,6 @@ from ui.translatable import TranslatableWidget
 
 class SettingsPage(TranslatableWidget):
     config_changed = pyqtSignal()
-    language_changed = pyqtSignal(str)
 
     SAVE_DELAY_MS = 400
 
@@ -47,7 +45,7 @@ class SettingsPage(TranslatableWidget):
         self._loading = True
 
         # 内容比窗口高时要有滚动条，否则卡片会被压扁、底部被切掉。
-        # （窗口最小高度 580，而这个页面五张卡片加起来约 650）
+        # （窗口最小高度 580，而这个页面几张卡片加起来超过它）
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -71,7 +69,6 @@ class SettingsPage(TranslatableWidget):
 
         layout.addSpacing(14)
 
-        layout.addWidget(self._make_language_card())
         layout.addWidget(self._make_mc_dir_card())
         layout.addWidget(self._make_java_card())
         layout.addWidget(self._make_memory_card())
@@ -91,7 +88,6 @@ class SettingsPage(TranslatableWidget):
 
     def retranslate(self):
         super().retranslate()
-        self._fill_language_combo()
         self._refresh_mc_dir_hint()
 
     # ---------- 卡片工厂 ----------
@@ -105,48 +101,6 @@ class SettingsPage(TranslatableWidget):
         box.setSpacing(10)
         box.addWidget(self.label(title, "SectionTitle"))
         return card, box
-
-    # ---------- 界面语言 ----------
-
-    def _make_language_card(self):
-        card, box = self._card("界面语言")
-
-        row = QHBoxLayout()
-        row.setSpacing(10)
-
-        field = self.label("语言", "FieldLabel")
-        row.addWidget(field)
-
-        self.language_combo = QComboBox()
-        self.language_combo.setFixedWidth(self.FIELD_WIDTH)
-        self.language_combo.currentIndexChanged.connect(self._on_language_selected)
-        row.addWidget(self.language_combo)
-        row.addStretch()
-        box.addLayout(row)
-
-        box.addWidget(self.label("切换后立刻生效，不需要重启。", "HintText"))
-
-        self._fill_language_combo()
-        return card
-
-    def _fill_language_combo(self):
-        """语言名用自己的语言显示（简体中文 / English），这是通行做法"""
-        current = i18n.current_language()
-        self.language_combo.blockSignals(True)
-        self.language_combo.clear()
-        for code in i18n.available_languages():
-            self.language_combo.addItem(i18n.language_name(code), code)
-        index = self.language_combo.findData(current)
-        self.language_combo.setCurrentIndex(index if index >= 0 else 0)
-        self.language_combo.blockSignals(False)
-
-    def _on_language_selected(self, _index: int):
-        if self._loading:
-            return
-        code = self.language_combo.currentData()
-        if code and code != i18n.current_language():
-            # 真正的切换交给主窗口做（它负责通知所有页面重设文字）
-            self.language_changed.emit(code)
 
     # ---------- 游戏目录 ----------
 
@@ -177,8 +131,8 @@ class SettingsPage(TranslatableWidget):
         reset_btn = self.button("恢复默认")
         reset_btn.clicked.connect(self._reset_mc_dir)
         row.addWidget(reset_btn)
-        row.addStretch()
 
+        row.addStretch()
         box.addLayout(row)
 
         self.mc_dir_hint = QLabel()
