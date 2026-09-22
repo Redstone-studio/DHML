@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'          # 只匹配 v1.0.0 / v1.2.3-beta 这类 tag
+
+permissions:
+  contents: write      # 必须！否则上传 Release 会 403
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt6 pyinstaller
+
+      - name: Build exe
+        run: |
+          pyinstaller --noconfirm --windowed --name MCLuncher ^
+            --add-data "assets;assets" ^
+            main.py
+
+      - name: Zip artifact
+        run: |
+          Compress-Archive -Path dist/MCLuncher/* -DestinationPath MCLuncher-${{ github.ref_name }}-win64.zip
+
+      - name: Create Release & Upload
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "MC Launcher ${{ github.ref_name }}"
+          body: |
+            ## 🎮 MC Launcher ${{ github.ref_name }}
+
+            自动构建于 ${{ github.event.head_commit.timestamp }}
+
+            ### 下载
+            - **Windows x64**: `MCLuncher-${{ github.ref_name }}-win64.zip`
+
+            ### 说明
+            解压后双击 `MCLuncher.exe` 运行。
+          files: MCLuncher-${{ github.ref_name }}-win64.zip
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
