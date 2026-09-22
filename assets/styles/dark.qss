@@ -11,12 +11,22 @@
      强调    绿 #5ec269（主操作）  蓝 #4a9eff（信息/选中）
              黄 #e0b341（警告）    红 #e0575f（错误）
 
-   字体栈里保留了 "Segoe UI Symbol" / "Segoe UI Emoji"。
-   少了它们，侧边栏的 ▶ ▤ ◍ ⚙ 会变成豆腐块。
+   两个必须知道的坑：
 
-   注意：这个文件以前从来没被加载过 —— 旧的 load_styles() 用相对路径
-   open("assets/styles/dark.qss")，而打包后它在 _internal/assets/ 里。
-   现在由 core/resources.py 的 stylesheet_path() 负责定位。
+   1) QLabel 必须显式设成透明。
+      上面那条 QWidget { background-color } 会连 QLabel 一起染上不透明底色，
+      于是标签在卡片 / 侧边栏上会露出一块颜色不一样的方块。
+      下面 #AccountAvatar / #Badge* / #WarningBanner 这些带底色的标签用的是
+      ID 选择器，优先级高于 QLabel，不受影响。
+
+   2) 图标一律走 @ICONS@ 占位符。
+      Qt 的 QSS 里 url() 的相对路径是按「当前工作目录」解析的，不是按 qss
+      文件所在目录 —— 打包成 exe 后工作目录一变就找不到图。
+      所以 ui/main_window.py 加载样式时会把 @ICONS@ 替换成 assets/icons 的
+      绝对路径。
+
+   另外：不要用 CSS 的 border 三角形技巧（border-left/right 透明 + width:0）
+   来画箭头，Qt 的 QSS 不支持，会画成方块。必须用图片。
    ============================================================================ */
 
 QWidget {
@@ -25,6 +35,11 @@ QWidget {
     font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei",
                  "Segoe UI Symbol", "Segoe UI Emoji", sans-serif;
     font-size: 14px;
+}
+
+/* 见文件顶部说明 1)：不加这条，所有文字都会带一块自己的底色 */
+QLabel {
+    background-color: transparent;
 }
 
 QMainWindow, #Root {
@@ -267,19 +282,17 @@ QLineEdit:focus {
     border-color: #5ec269;
 }
 QLineEdit:disabled {
-    background-color: #212226;
+    background-color: #1f2024;
     color: #6e7076;
     border-color: #2b2d31;
 }
-QLineEdit::placeholder {
-    color: #56585e;
-}
 
+/* ---- 数字框：上下箭头用真图标 ---- */
 QSpinBox {
     background-color: #292a2f;
     border: 1px solid #3a3c42;
     border-radius: 8px;
-    padding: 6px 8px;
+    padding: 6px 6px 6px 10px;
     color: #e9e9ec;
     min-width: 96px;
     selection-background-color: #3f6ea8;
@@ -290,32 +303,43 @@ QSpinBox:hover {
 QSpinBox:focus {
     border-color: #5ec269;
 }
-QSpinBox::up-button, QSpinBox::down-button {
-    background-color: transparent;
+QSpinBox:disabled {
+    background-color: #1f2024;
+    color: #6e7076;
+    border-color: #2b2d31;
+}
+QSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 22px;
+    margin: 2px 3px 0 0;
     border: none;
-    width: 18px;
+    background: transparent;
+}
+QSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 22px;
+    margin: 0 3px 2px 0;
+    border: none;
+    background: transparent;
+}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background-color: #3a3c42;
+    border-radius: 4px;
 }
 QSpinBox::up-arrow {
-    image: none;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-bottom: 5px solid #a0a1a7;
-    width: 0;
-    height: 0;
+    image: url(@ICONS@/chevron-up.svg);
+    width: 11px;
+    height: 11px;
 }
 QSpinBox::down-arrow {
-    image: none;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid #a0a1a7;
-    width: 0;
-    height: 0;
-}
-QSpinBox::up-arrow:hover, QSpinBox::down-arrow:hover {
-    border-bottom-color: #5ec269;
-    border-top-color: #5ec269;
+    image: url(@ICONS@/chevron-down.svg);
+    width: 11px;
+    height: 11px;
 }
 
+/* ---- 下拉框 ---- */
 QComboBox {
     background-color: #292a2f;
     border: 1px solid #3a3c42;
@@ -331,25 +355,21 @@ QComboBox:focus {
     border-color: #5ec269;
 }
 QComboBox:disabled {
-    background-color: #212226;
+    background-color: #1f2024;
     color: #6e7076;
     border-color: #2b2d31;
 }
 QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 30px;
     border: none;
-    width: 26px;
+    background: transparent;
 }
 QComboBox::down-arrow {
-    image: none;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid #a0a1a7;
-    width: 0;
-    height: 0;
-    margin-right: 8px;
-}
-QComboBox::down-arrow:hover {
-    border-top-color: #5ec269;
+    image: url(@ICONS@/chevron-down.svg);
+    width: 12px;
+    height: 12px;
 }
 QComboBox QAbstractItemView {
     background-color: #26282d;
@@ -366,46 +386,64 @@ QComboBox QAbstractItemView::item {
     border-radius: 6px;
     min-height: 22px;
 }
+QComboBox QAbstractItemView::separator {
+    height: 1px;
+    background-color: #3a3c42;
+    margin: 4px 6px;
+}
 
+/* ---- 勾选框 / 单选框：统一成 PCL2 那种打勾样式 ---- */
 QCheckBox {
     color: #d8d8dc;
-    spacing: 8px;
-    padding: 2px;
+    spacing: 9px;
+    padding: 3px;
 }
-QCheckBox::indicator {
-    width: 16px;
-    height: 16px;
+QCheckBox:hover {
+    color: #ffffff;
+}
+
+QCheckBox::indicator,
+QRadioButton::indicator {
+    width: 17px;
+    height: 17px;
     border-radius: 4px;
     border: 1px solid #4a4d54;
-    background-color: #292a2f;
+    background-color: #232428;
 }
-QCheckBox::indicator:hover {
+QCheckBox::indicator:hover,
+QRadioButton::indicator:hover {
     border-color: #5ec269;
 }
-QCheckBox::indicator:checked {
+QCheckBox::indicator:checked,
+QRadioButton::indicator:checked {
     background-color: #3f8f4b;
     border-color: #5ec269;
+    image: url(@ICONS@/check.svg);
+}
+QCheckBox::indicator:disabled,
+QRadioButton::indicator:disabled {
+    border-color: #2b2d31;
+    background-color: #1f2024;
 }
 
 QRadioButton {
     color: #d8d8dc;
-    spacing: 8px;
-    padding: 8px 10px;
+    spacing: 9px;
+    padding: 9px 11px;
+    border: 1px solid transparent;
     border-radius: 8px;
 }
 QRadioButton:hover {
     background-color: #26282d;
 }
-QRadioButton::indicator {
-    width: 16px;
-    height: 16px;
-    border-radius: 9px;
-    border: 1px solid #4a4d54;
-    background-color: #292a2f;
+QRadioButton:checked {
+    background-color: #24361f;
+    border-color: #37522f;
+    color: #b6f0bf;
+    font-weight: bold;
 }
-QRadioButton::indicator:checked {
-    border: 5px solid #3f8f4b;
-    background-color: #ffffff;
+QRadioButton:disabled {
+    color: #56585e;
 }
 
 /* ============================ 列表 / 表格 ============================ */
