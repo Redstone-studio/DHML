@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号（如 v0.2.0）'
+        description: '版本号（如 v0.0.1-alpha）'
         required: true
-        default: 'v0.0.1'
+        default: 'v0.0.1-alpha'
       prerelease:
         description: '是否为预发布版'
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: write
@@ -30,15 +30,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install PyQt6 pyinstaller
 
+      # ---------- 关键修正：单行，避免 PowerShell 的 ^ 换行符坑 ----------
       - name: Build
-        run: |
-          pyinstaller --noconfirm --windowed --name MCLuncher ^
-            --add-data "assets;assets" ^
-            main.py
+        run: pyinstaller --noconfirm --windowed --name MCLuncher --add-data "assets;assets" main.py
 
       - name: Zip
-        run: |
-          Compress-Archive -Path dist/MCLuncher/* -DestinationPath MCLuncher-${{ inputs.version }}-win64.zip
+        run: Compress-Archive -Path dist/MCLuncher/* -DestinationPath MCLuncher-${{ inputs.version }}-win64.zip
 
       - name: Release
         uses: softprops/action-gh-release@v2
