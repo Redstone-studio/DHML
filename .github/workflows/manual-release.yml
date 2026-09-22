@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号（如 v0.1.0-alpha）'
+        description: '版本号（如 v0.1.6-alpha）'
         required: true
-        default: 'v0.0.5-alpha'
+        default: 'v0.1.6-alpha'
       prerelease:
         description: '是否为预发布版'
         type: boolean
@@ -19,18 +19,69 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      # fetch-depth: 0 是为了能拿到上一个 tag —— 发行说明末尾要生成 compare 链接
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      # ---------- 发行说明 ----------
+      # 从 CHANGELOG.md 里抓「版本号完全相同」的那一节（写到下一个 ## 标题为止）。
+      # 抓不到也不会让发版失败，只在正文里写一句提示。
+      - name: 组装发行说明
+        shell: pwsh
+        run: |
+          $ver  = "${{ inputs.version }}".Trim()
+          $prev = (git describe --tags --abbrev=0 --match 'v*' 2>$null)
+          $body = @()
+
+          if (Test-Path CHANGELOG.md) {
+            $picked = @()
+            $inside = $false
+            foreach ($line in (Get-Content CHANGELOG.md -Encoding UTF8)) {
+              if ($line -match '^##\s+') {
+                if ($inside) { break }
+                $inside = (($line -replace '^##\s+', '').Trim() -eq $ver)
+                continue
+              }
+              if ($inside) { $picked += $line }
+            }
+            $text = ($picked -join "`n").Trim()
+            if ($text) {
+              $body += "## 更新内容"
+              $body += ""
+              $body += $text
+            }
+          }
+
+          if ($body.Count -eq 0) {
+            $body += "本次没有在 CHANGELOG.md 里找到 $ver 的说明。"
+          }
+
+          $body += ""
+          $body += "---"
+          if ($prev) {
+            $body += "**完整变更**：https://github.com/${{ github.repository }}/compare/$prev...$ver"
+          }
+          $body += ""
+          $body += "**下载**：见下方 Assets。"
+
+          $body -join "`n" | Set-Content RELEASE_BODY.md -Encoding UTF8
+          Write-Host "---- 发行说明 ----"
+          Get-Content RELEASE_BODY.md
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install PyQt6 pyinstaller
 
-      # ---------- 关键修正：单行，避免 PowerShell 的 ^ 换行符坑 ----------
+      # 注意：windows 上默认 shell 是 pwsh，`^` 不是续行符（那是 cmd 的写法），
+      # 写成多行会让 pyinstaller 丢参数并把 main.py 当成一条独立命令。必须单行。
       - name: Build
         run: pyinstaller --noconfirm --windowed --name MCLuncher --add-data "assets;assets" main.py
 
@@ -42,6 +93,6 @@ jobs:
         with:
           tag_name: ${{ inputs.version }}
           name: "MC Launcher ${{ inputs.version }}"
+          body_path: RELEASE_BODY.md
           prerelease: ${{ inputs.prerelease }}
           files: MCLuncher-${{ inputs.version }}-win64.zip
-          generate_release_notes: true
