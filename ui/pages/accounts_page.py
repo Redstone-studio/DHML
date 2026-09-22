@@ -7,20 +7,69 @@
 每次 refresh() 里的 setCurrentItem 都触发 set_current + 写盘，并在刷新时重复
 发信号。现在改成显式的「设为当前」按钮。
 
-文案：静态文字走 self.label()/self.button()；列表项是生成的，
-所以在 retranslate() 里直接整表重建。
+列表行的做法和版本页一致：QListWidget + 自定义行控件。
+两个 Qt 细节：
+- 行控件是普通 QWidget 子类，默认不画 QSS 背景 —— 正好让选中底色透出来
+- 行控件必须设 WA_TransparentForMouseEvents，否则点击被它吃掉，选不中
 """
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QListWidget, QListWidgetItem, QMessageBox,
-    QPushButton, QVBoxLayout
+    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox,
+    QPushButton, QVBoxLayout, QWidget
 )
 
 from core.accounts import type_label
 from core.i18n import tr
 from ui.icons import ACCOUNT_TYPE_ICONS, icon
 from ui.translatable import TranslatableWidget
+
+ROW_HEIGHT = 62
+
+
+class _AccountRow(QWidget):
+    """一行账户：图标 + 名字/uuid + 右侧标签"""
+
+    def __init__(self, account: dict, is_current: bool):
+        super().__init__()
+        # 让点击穿透到 QListWidget，否则选中功能整个失效
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 6, 12, 6)
+        layout.setSpacing(12)
+
+        avatar = QLabel()
+        avatar.setFixedSize(30, 30)
+        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        avatar.setPixmap(
+            icon(ACCOUNT_TYPE_ICONS.get(account.get("type"), "offline")).pixmap(QSize(20, 20))
+        )
+        layout.addWidget(avatar)
+
+        text_box = QVBoxLayout()
+        text_box.setContentsMargins(0, 0, 0, 0)
+        text_box.setSpacing(2)
+
+        name = QLabel(str(account.get("name", "?")))
+        name.setObjectName("AccountRowName")
+        text_box.addWidget(name)
+
+        uuid_text = str(account.get("uuid", ""))
+        meta = QLabel(f"{uuid_text[:8]}…" if uuid_text else "—")
+        meta.setObjectName("AccountRowMeta")
+        text_box.addWidget(meta)
+
+        layout.addLayout(text_box, 1)
+
+        type_tag = QLabel(type_label(account.get("type")))
+        type_tag.setObjectName("Badge")
+        layout.addWidget(type_tag)
+
+        if is_current:
+            current_tag = QLabel(tr("当前使用"))
+            current_tag.setObjectName("BadgeAccent")
+            layout.addWidget(current_tag)
 
 
 class AccountsPage(TranslatableWidget):
@@ -44,7 +93,9 @@ class AccountsPage(TranslatableWidget):
 
         self.list = QListWidget()
         self.list.setObjectName("AccountList")
-        self.list.setIconSize(QSize(20, 20))
+        self.list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self.list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         layout.addWidget(self.list, 1)
 
         self.empty_label = self.label(
@@ -80,7 +131,7 @@ class AccountsPage(TranslatableWidget):
 
     def retranslate(self):
         super().retranslate()
-        # 列表内容是生成的，直接重建
+        # 列表行是生成的，直接重建
         self.reload()
 
     # ---------- 列表 ----------
@@ -91,10 +142,11 @@ class AccountsPage(TranslatableWidget):
         self.list.clear()
         current = self.manager.current
         for account in self.manager.accounts:
-            item = QListWidgetItem(self._format(account, account["name"] == current))
+            item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, account["name"])
-            item.setIcon(icon(ACCOUNT_TYPE_ICONS.get(account.get("type"), "offline")))
+            item.setSizeHint(QSize(0, ROW_HEIGHT))
             self.list.addItem(item)
+            self.list.setItemWidget(item, _AccountRow(account, account["name"] == current))
 
         # 恢复选中：优先恢复刷新前选中的那一项，否则选当前档案
         target = previous or current
@@ -110,14 +162,6 @@ class AccountsPage(TranslatableWidget):
         self.empty_label.setVisible(not has_any)
         self.current_btn.setEnabled(has_any)
         self.remove_btn.setEnabled(has_any)
-
-    @staticmethod
-    def _format(account: dict, is_current: bool) -> str:
-        type_text = type_label(account.get("type"))
-        uuid_text = str(account.get("uuid", ""))
-        short_uuid = f"{uuid_text[:8]}…" if uuid_text else "—"
-        mark = f"      ← {tr('当前使用')}" if is_current else ""
-        return f"{account.get('name', '?')}{mark}\n{type_text}    {short_uuid}"
 
     def _selected_name(self):
         item = self.list.currentItem()
@@ -138,7 +182,8 @@ class AccountsPage(TranslatableWidget):
             return
         reply = QMessageBox.question(
             self, tr("删除档案"),
-            tr("确定删除档案「{name}」吗？", name=name) + "\n\n" + tr("这只删除本地记录，不影响游戏内的数据。"),
+            tr("确定删除档案「{name}」吗？", name=name) + "\n\n"
+            + tr("这只删除本地记录，不影响游戏内的数据。"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

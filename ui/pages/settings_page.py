@@ -17,7 +17,7 @@ from pathlib import Path
 from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QSpinBox, QVBoxLayout
+    QMessageBox, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget
 )
 
 from core import i18n
@@ -33,12 +33,34 @@ class SettingsPage(TranslatableWidget):
 
     SAVE_DELAY_MS = 400
 
+    # 表单控件的统一宽度。
+    #
+    # 这里可以安心用固定值，因为 QLineEdit 内容太长时会**自己横向滚动**，
+    # 不会把文字挤没；下拉框最多让长选项省略号显示。
+    # 但 QLabel / QPushButton 那种"文字必须完整放得下"的控件千万不要锁死宽度
+    # —— 界面文字会随语言变长（"启动游戏" → "Launch Game"）。
+    FIELD_WIDTH = 300
+
     def __init__(self):
         super().__init__()
         # 初始化期间不要触发任何写盘
         self._loading = True
 
-        layout = QVBoxLayout(self)
+        # 内容比窗口高时要有滚动条，否则卡片会被压扁、底部被切掉。
+        # （窗口最小高度 580，而这个页面五张卡片加起来约 650）
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        outer.addWidget(scroll)
+
+        content = QWidget()
+        scroll.setWidget(content)
+
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(32, 28, 32, 28)
         layout.setSpacing(8)
 
@@ -96,7 +118,7 @@ class SettingsPage(TranslatableWidget):
         row.addWidget(field)
 
         self.language_combo = QComboBox()
-        self.language_combo.setMinimumWidth(180)
+        self.language_combo.setFixedWidth(self.FIELD_WIDTH)
         self.language_combo.currentIndexChanged.connect(self._on_language_selected)
         row.addWidget(self.language_combo)
         row.addStretch()
@@ -136,6 +158,11 @@ class SettingsPage(TranslatableWidget):
 
         self.mc_dir_input = QLineEdit()
         self.mc_dir_input.setText(config.get("minecraft_dir", ""))
+        # 这一行右边有三个按钮，而按钮宽度**随语言变**（中文"恢复默认"86px，
+        # 英文"Reset"99px，长一点的译文还会更宽）。所以输入框不能固定死，
+        # 给它一个范围：宽的时候涨到 300（和别的控件对齐），挤的时候缩到 200。
+        self.mc_dir_input.setMinimumWidth(200)
+        self.mc_dir_input.setMaximumWidth(self.FIELD_WIDTH)
         self.bind(self.mc_dir_input, "留空 = 使用默认路径", "placeholderText")
         row.addWidget(self.mc_dir_input, 1)
 
@@ -150,6 +177,7 @@ class SettingsPage(TranslatableWidget):
         reset_btn = self.button("恢复默认")
         reset_btn.clicked.connect(self._reset_mc_dir)
         row.addWidget(reset_btn)
+        row.addStretch()
 
         box.addLayout(row)
 
@@ -215,8 +243,10 @@ class SettingsPage(TranslatableWidget):
         self.java_input = QLineEdit()
         self.java_input.setText(config.get("java_path", ""))
         self.java_input.setEnabled(False)
+        self.java_input.setFixedWidth(self.FIELD_WIDTH)
         self.bind(self.java_input, "自动查找", "placeholderText")
-        row.addWidget(self.java_input, 1)
+        row.addWidget(self.java_input)
+        row.addStretch()
 
         box.addLayout(row)
         box.addWidget(self.label(
