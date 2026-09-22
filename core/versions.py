@@ -7,17 +7,22 @@
 2. versions/ 底下会混进非版本的东西：.zip 压缩包、native-libraries 目录等。
    判据是"有没有一个带 id 的 json"，不是"是不是目录"。
 3. 文件夹名可能带空格、中文、全角字符，全部按 UTF-8 原样处理，不做转义。
-4. 单个版本坏掉（json 损坏、权限不足）不能影响其它版本，只记进 errors。
+4. 单个版本坏掉不能影响其它版本，只记进 errors。
 5. 模组版本（Fabric/Forge）自己往往没有 jar，真正的 jar 在 inheritsFrom
    指向的父版本里，所以 jar 可能是 None，由启动器顺着 inherits_from 往上找。
 6. 整合包的 json 里 type 也写着 "release"、releaseTime 还很新，直接按类型+时间
    排序会让下拉框榜首全是整合包，所以必须分三段（见 _sort_key）。
-7. 只依赖标准库，不 import PyQt6 —— core/ 不需要知道 UI 的存在。
+7. pathlib 的 is_file() / exists() 在 Python 3.11、3.12 上碰到 WinError 5
+   （拒绝访问）会**抛异常**，而不是返回 False；3.13+ 才改成返回 False。
+   真实环境里确实有这种目录（ACL 被改坏、被安全软件锁住、解压中断），
+   所以这里一律用 _safe_stat() 包一层，不能让一个坏目录拖垮整次扫描。
+8. 只依赖标准库，不 import PyQt6 —— core/ 不需要知道 UI 的存在。
 """
 
 import json
 import os
 import re
+import stat
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -63,6 +68,43 @@ _KIND_RANK = {"vanilla": 0, "loader": 1, "pack": 2}
 # 排序用的版本类型优先级，越小越靠前
 _TYPE_RANK = {"release": 0, "snapshot": 1, "old_beta": 2, "old_alpha": 3}
 _UNKNOWN_RANK = 9
+
+
+# ---------- 安全的文件系统探测 ----------
+# 存在的意义：绝不让"读不了某个文件"变成"整个扫描崩掉"。
+
+def _safe_stat(path):
+    """stat 的安全版本，出错就返回 None
+
+    pathlib 的 is_file()/is_dir()/exists() 在 Python 3.11、3.12 上遇到
+    ERROR_ACCESS_DENIED 会把异常抛出来，而不是按文档说的返回 False。
+    """
+    try:
+        return os.stat(path)
+    except (OSError, ValueError):
+        return None
+
+
+def _is_file(path) -> bool:
+    st = _safe_stat(path)
+    return st is not None and stat.S_ISREG(st.st_mode)
+
+
+def _is_dir(path) -> bool:
+    st = _safe_stat(path)
+    return st is not None and stat.S_ISDIR(st.st_mode)
+
+
+def _exists(path) -> bool:
+    return _safe_stat(path) is not None
+
+
+def _glob(dir_path: Path, pattern: str) -> "list[Path]":
+    """glob 的安全版本：目录枚举不了就当空目录"""
+    try:
+        return sorted(dir_path.glob(pattern))
+    except OSError:
+        return []
 
 
 def default_minecraft_dir() -> Path:
@@ -139,11 +181,12 @@ class VersionScanner:
             release_time  str|None   json 里的 releaseTime
 
         排序规则见 _sort_key：官方版本 → 加载器版本 → 整合包。
+        读不了的版本会被跳过并记进 self.errors，不会中断扫描。
         """
         self.errors = []
 
-        if not self.versions_dir.is_dir():
-            self.errors.append(f"版本目录不存在: {self.versions_dir}")
+        if not _is_dir(self.versions_dir):
+            self.errors.append(f"版本目录不存在或无法访问: {self.versions_dir}")
             return []
 
         try:
@@ -154,9 +197,15 @@ class VersionScanner:
 
         versions: "list[dict]" = []
         for entry in entries:
-            if not entry.is_dir():      # 跳过 versions 底下的 .zip 之类
+            if not _is_dir(entry):      # 跳过 versions 底下的 .zip 之类
                 continue
-            info = self._read_one(entry)
+            try:
+                info = self._read_one(entry)
+            except Exception as e:
+                # 兜底：任何一个版本出问题都不能拖垮整次扫描。
+                # 没有这层，一个 ACL 坏掉的目录就能让整个启动器崩掉。
+                self.errors.append(f"{entry.name}: 读取失败 ({type(e).__name__}: {e})")
+                continue
             if info is not None:
                 versions.append(info)
 
@@ -213,25 +262,36 @@ class VersionScanner:
     def _load_json(self, dir_path: Path) -> "tuple[Path, dict] | None":
         """找出并读出该版本的 json
 
-        优先 <文件夹名>.json；对不上时退化为目录下其它的 *.json（整合包常被改名）。
-        一个能用的 json 都没有 → 这根本不是版本目录，静默跳过。
+        优先 <文件夹名>.json；对不上时再看目录下其它的 *.json（整合包常被改名）。
+        三种失败要分清楚：
+          - 文件不存在         → 这本来就不是版本目录（native-libraries 之类），静默跳过
+          - 拒绝访问 / 读取失败 → 记进 errors，用户需要知道
+          - json 解析失败       → 记进 errors
         """
         preferred = dir_path / f"{dir_path.name}.json"
-        candidates: "list[Path]" = []
-        if preferred.is_file():
-            candidates.append(preferred)
-        candidates += [p for p in sorted(dir_path.glob("*.json")) if p != preferred]
+        # 注意：不能先 is_file() 判断，那个调用本身就可能抛 WinError 5。
+        # 直接把 preferred 当候选，靠 read_text 的异常类型来分流。
+        candidates: "list[Path]" = [preferred]
+        candidates += [p for p in _glob(dir_path, "*.json") if p != preferred]
 
         for path in candidates:
             try:
-                data = json.loads(path.read_text(encoding="utf-8-sig"))
-            except Exception as e:
-                # 只对"本该是版本 json"的那个报错，其它杂 json 不打扰用户
-                if path == preferred:
-                    self.errors.append(f"{dir_path.name}/{path.name}: 读取失败 ({e})")
+                text = path.read_text(encoding="utf-8-sig")
+            except FileNotFoundError:
+                continue                    # 正常情况，不是版本目录
+            except OSError as e:
+                self.errors.append(f"{dir_path.name}/{path.name}: 无法读取 ({e})")
                 continue
+
+            try:
+                data = json.loads(text)
+            except ValueError as e:
+                self.errors.append(f"{dir_path.name}/{path.name}: json 格式错误 ({e})")
+                continue
+
             if isinstance(data, dict) and data.get("id"):
                 return path, data
+            # 能读但不像版本 json（缺 id）→ 静默跳过，不打扰用户
 
         return None
 
@@ -244,10 +304,10 @@ class VersionScanner:
         """
         for name in (f"{version_id}.jar", f"{dir_path.name}.jar"):
             candidate = dir_path / name
-            if candidate.is_file():
+            if _is_file(candidate):
                 return candidate
-        # 文件夹和 jar 都改过名的情况：目录下只有一个 jar 就认它
-        jars = sorted(dir_path.glob("*.jar"))
+        # 文件夹和 jar 都改过名的情况：目录下只有一个能用的 jar 就认它
+        jars = [p for p in _glob(dir_path, "*.jar") if _is_file(p)]
         return jars[0] if len(jars) == 1 else None
 
     def _detect_game_dir(self, dir_path: Path) -> "tuple[Path, bool]":
@@ -258,7 +318,7 @@ class VersionScanner:
         这是启发式判断，不是百分之百可靠。
         """
         for marker in _ISOLATED_MARKERS:
-            if (dir_path / marker).exists():
+            if _exists(dir_path / marker):
                 return dir_path, True
         return self.mc_dir, False
 
