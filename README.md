@@ -57,14 +57,6 @@ pyinstaller --noconfirm --windowed --name MCLuncher --add-data "assets;assets" m
 > 那个文件，`FileNotFoundError` 又被 `except: pass` 吞掉，结果**五个发行版的界面
 > 全都没有样式**。现在异常会打印出来，不会再静默失败。
 
-## 界面约定
-
-- 颜色和间距全部集中在 `assets/styles/dark.qss`，改风格只动那一个文件
-- 控件的 `objectName` 就是 QSS 的选择器（`#PrimaryButton`、`#Card`、`#BadgeWarn` …）
-- 字体栈里保留了 `Segoe UI Symbol` / `Segoe UI Emoji`，删掉的话侧边栏的
-  `▶ ▤ ◍ ⚙` 会变成豆腐块
-- 图标一律用几何符号，不用 emoji（emoji 在缺字体的机器上会变方块）
-
 ## 还没做
 
 - `v0.2.0-alpha` 拼 Java 命令并真正启动游戏
