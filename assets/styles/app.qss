@@ -712,6 +712,38 @@ QScrollArea > QWidget > QWidget {
     background-color: transparent;
 }
 
+/* ==================== 关于页 ==================== */
+
+#AboutName {
+    color: @text_bright@;
+    font-size: 20px;
+    font-weight: bold;
+}
+
+#LicenseName {
+    color: @text@;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+#LicenseText {
+    color: @text_dim@;
+    font-size: 13px;
+}
+
+/* 次要按钮：透明底 + 细边框。"查看来源网站"这类不该抢主操作的注意力 */
+#LinkButton {
+    background-color: transparent;
+    border: 1px solid @border_control@;
+    color: @text_secondary@;
+    padding: 5px 12px;
+}
+#LinkButton:hover {
+    background-color: @bg_elevated@;
+    border-color: @accent@;
+    color: @accent@;
+}
+
 /* ============================ 对话框 ============================ */
 
 QDialog {

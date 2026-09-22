@@ -47,15 +47,15 @@ class _ColorSwatch(QPushButton):
     """圆形色块按钮，选中时加一圈描边
 
     color 为空串表示"用主题自带的强调色"，所以画什么得由外面告诉它。
+    提示文字由外面用 bind(..., "toolTip") 登记，切语言时会自动跟着变。
     """
 
-    def __init__(self, color: str, tooltip: str):
+    def __init__(self, color: str):
         super().__init__()
         self.color = color
         self.setCheckable(True)
         self.setFixedSize(SWATCH_SIZE, SWATCH_SIZE)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(tooltip)
 
     def refresh(self, fallback: str, ring: str):
         shown = self.color or fallback
@@ -104,8 +104,7 @@ class PersonalizePage(TranslatableWidget):
         super().retranslate()
         self._fill_theme_combo()
         self._fill_language_combo()
-        for swatch, (_value, name) in zip(self.swatches, PRESET_COLORS):
-            swatch.setToolTip(tr(name))
+        self._refresh_all()
 
     # ---------- 卡片 ----------
 
@@ -148,13 +147,18 @@ class PersonalizePage(TranslatableWidget):
             cell_layout.setContentsMargins(0, 0, 0, 0)
             cell_layout.setSpacing(7)
 
-            swatch = _ColorSwatch(value, tr(name))
+            # 注意：这两个都要走 self.bind() —— 它会把文案登记进基类，
+            # 语言切换时自动重设。直接 QLabel(tr(name)) 的话只在构造时取一次，
+            # 切语言后文字不会变（这个坑真犯过）。
+            swatch = _ColorSwatch(value)
             swatch.clicked.connect(lambda _checked, v=value: self._set_accent(v))
+            self.bind(swatch, name, "toolTip")
             self.swatches.append(swatch)
             cell_layout.addWidget(swatch)
 
-            label = QLabel(tr(name))
+            label = QLabel()
             label.setObjectName("FieldLabel")
+            self.bind(label, name)
             cell_layout.addWidget(label)
 
             grid.addWidget(cell, index // 4, index % 4)

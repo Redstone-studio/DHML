@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 from core.config import config
 from core.i18n import tr
 from core.versions import default_minecraft_dir
+from ui.dialogs.about_dialog import AboutDialog
 from ui.translatable import TranslatableWidget
 
 
@@ -73,6 +74,7 @@ class SettingsPage(TranslatableWidget):
         layout.addWidget(self._make_java_card())
         layout.addWidget(self._make_memory_card())
         layout.addWidget(self._make_misc_card())
+        layout.addWidget(self._make_about_card())
         layout.addStretch()
 
         # 内存数值的防抖保存
@@ -272,6 +274,29 @@ class SettingsPage(TranslatableWidget):
         config.data["min_memory"] = self.min_mem.value()
         config.data["max_memory"] = self.max_mem.value()
         config.save()
+
+    # ---------- 关于 ----------
+
+    def _make_about_card(self):
+        """软件信息不占导航项，收在这里弹对话框
+
+        这类内容一辈子看一次，占一个常驻入口不划算（PCL2 也是收在设置里的）。
+        """
+        card, box = self._card("关于")
+
+        box.addWidget(self.label("版本信息、隐私说明和开源许可", "HintText"))
+
+        row = QHBoxLayout()
+        about_btn = self.button("查看软件信息")
+        about_btn.clicked.connect(self._open_about)
+        row.addWidget(about_btn)
+        row.addStretch()
+        box.addLayout(row)
+
+        return card
+
+    def _open_about(self):
+        AboutDialog(self).exec()
 
     # ---------- 其他 ----------
 
