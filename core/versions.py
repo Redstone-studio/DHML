@@ -27,6 +27,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from core.i18n import tr
+
 __all__ = [
     "VersionScanner",
     "default_minecraft_dir",
@@ -69,14 +71,21 @@ _NON_RELEASE_OFFICIAL = ("snapshot", "old_beta", "old_alpha")
 # 分类优先级：官方版本 → 加载器版本 → 整合包 / 认不出来的
 _KIND_RANK = {"vanilla": 0, "loader": 1, "pack": 2}
 
-# 版本类型的显示名
-TYPE_LABELS = {
+# 版本类型的**源文案**（中文即 key，见 core/i18n.py）
+_TYPE_LABELS = {
     "release": "正式版",
     "snapshot": "快照",
     "old_beta": "远古 Beta",
     "old_alpha": "远古 Alpha",
-    "unknown": "未知",
-}
+}  # noqa: i18n  —— 这些中文在 type_label() 里过 tr()
+
+
+def type_label(key: str) -> str:
+    """版本类型的显示名（每次调用都过 tr()，所以跟着语言走）
+
+    千万别在别处缓存这个字典 —— 静态字典在语言切换后不会更新。
+    """
+    return tr(_TYPE_LABELS.get(key, "未知"))
 
 # 排序用的版本类型优先级，越小越靠前
 _TYPE_RANK = {"release": 0, "snapshot": 1, "old_beta": 2, "old_alpha": 3}
@@ -200,13 +209,13 @@ class VersionScanner:
         self.errors = []
 
         if not _is_dir(self.versions_dir):
-            self.errors.append(f"版本目录不存在或无法访问: {self.versions_dir}")
+            self.errors.append(tr("版本目录不存在或无法访问: {path}", path=self.versions_dir))
             return []
 
         try:
             entries = sorted(self.versions_dir.iterdir(), key=lambda p: p.name.lower())
         except OSError as e:
-            self.errors.append(f"版本目录无法读取: {e}")
+            self.errors.append(tr("版本目录无法读取: {err}", err=e))
             return []
 
         versions: "list[dict]" = []
@@ -218,7 +227,10 @@ class VersionScanner:
             except Exception as e:
                 # 兜底：任何一个版本出问题都不能拖垮整次扫描。
                 # 没有这层，一个 ACL 坏掉的目录就能让整个启动器崩掉。
-                self.errors.append(f"{entry.name}: 读取失败 ({type(e).__name__}: {e})")
+                self.errors.append(
+                    tr("{name}: 读取失败 ({kind}: {err})",
+                       name=entry.name, kind=type(e).__name__, err=e)
+                )
                 continue
             if info is not None:
                 versions.append(info)
@@ -295,13 +307,19 @@ class VersionScanner:
             except FileNotFoundError:
                 continue                    # 正常情况，不是版本目录
             except OSError as e:
-                self.errors.append(f"{dir_path.name}/{path.name}: 无法读取 ({e})")
+                self.errors.append(
+                    tr("{file}: 无法读取 ({err})",
+                       file=f"{dir_path.name}/{path.name}", err=e)
+                )
                 continue
 
             try:
                 data = json.loads(text)
             except ValueError as e:
-                self.errors.append(f"{dir_path.name}/{path.name}: json 格式错误 ({e})")
+                self.errors.append(
+                    tr("{file}: json 格式错误 ({err})",
+                       file=f"{dir_path.name}/{path.name}", err=e)
+                )
                 continue
 
             if isinstance(data, dict) and data.get("id"):

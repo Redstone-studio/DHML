@@ -7,20 +7,23 @@
 每次 refresh() 里的 setCurrentItem 都触发 set_current + 写盘，并在刷新时重复
 发信号。现在改成显式的「设为当前」按钮。
 
-图标用 assets/icons/*.svg（见 ui/icons.py），不用 emoji。
+文案：静态文字走 self.label()/self.button()；列表项是生成的，
+所以在 retranslate() 里直接整表重建。
 """
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox,
-    QPushButton, QVBoxLayout, QWidget
+    QHBoxLayout, QListWidget, QListWidgetItem, QMessageBox,
+    QPushButton, QVBoxLayout
 )
 
-from core.accounts import TYPE_LABELS
+from core.accounts import type_label
+from core.i18n import tr
 from ui.icons import ACCOUNT_TYPE_ICONS, icon
+from ui.translatable import TranslatableWidget
 
 
-class AccountsPage(QWidget):
+class AccountsPage(TranslatableWidget):
     accounts_changed = pyqtSignal()
     add_requested = pyqtSignal()
 
@@ -32,13 +35,10 @@ class AccountsPage(QWidget):
         layout.setContentsMargins(32, 28, 32, 28)
         layout.setSpacing(8)
 
-        title = QLabel("账户")
-        title.setObjectName("PageTitle")
-        layout.addWidget(title)
-
-        subtitle = QLabel("目前只有离线验证可用；正版验证和第三方验证还在路上")
-        subtitle.setObjectName("PageSubtitle")
-        layout.addWidget(subtitle)
+        layout.addWidget(self.label("账户", "PageTitle"))
+        layout.addWidget(self.label(
+            "目前只有离线验证可用；正版验证和第三方验证还在路上", "PageSubtitle"
+        ))
 
         layout.addSpacing(14)
 
@@ -47,8 +47,9 @@ class AccountsPage(QWidget):
         self.list.setIconSize(QSize(20, 20))
         layout.addWidget(self.list, 1)
 
-        self.empty_label = QLabel("还没有任何档案，点下面的「新建档案」开始")
-        self.empty_label.setObjectName("EmptyState")
+        self.empty_label = self.label(
+            "还没有任何档案，点下面的「新建档案」开始", "EmptyState"
+        )
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.empty_label)
 
@@ -57,24 +58,29 @@ class AccountsPage(QWidget):
         buttons = QHBoxLayout()
         buttons.setSpacing(10)
 
-        self.add_btn = QPushButton("新建档案")
-        self.add_btn.setObjectName("PrimaryButton")
+        self.add_btn = self.button("新建档案", "PrimaryButton")
         self.add_btn.clicked.connect(self.add_requested.emit)
         buttons.addWidget(self.add_btn)
 
-        self.current_btn = QPushButton("设为当前")
+        self.current_btn = self.button("设为当前")
         self.current_btn.clicked.connect(self._set_current)
         buttons.addWidget(self.current_btn)
 
         buttons.addStretch()
 
-        self.remove_btn = QPushButton("删除")
-        self.remove_btn.setObjectName("DangerButton")
+        self.remove_btn = self.button("删除", "DangerButton")
         self.remove_btn.clicked.connect(self._remove)
         buttons.addWidget(self.remove_btn)
 
         layout.addLayout(buttons)
 
+        self.reload()
+
+    # ---------- 语言切换 ----------
+
+    def retranslate(self):
+        super().retranslate()
+        # 列表内容是生成的，直接重建
         self.reload()
 
     # ---------- 列表 ----------
@@ -107,11 +113,11 @@ class AccountsPage(QWidget):
 
     @staticmethod
     def _format(account: dict, is_current: bool) -> str:
-        type_label = TYPE_LABELS.get(account.get("type"), "未知")
+        type_text = type_label(account.get("type"))
         uuid_text = str(account.get("uuid", ""))
         short_uuid = f"{uuid_text[:8]}…" if uuid_text else "—"
-        mark = "      ← 当前使用" if is_current else ""
-        return f"{account.get('name', '?')}{mark}\n{type_label}    {short_uuid}"
+        mark = f"      ← {tr('当前使用')}" if is_current else ""
+        return f"{account.get('name', '?')}{mark}\n{type_text}    {short_uuid}"
 
     def _selected_name(self):
         item = self.list.currentItem()
@@ -131,8 +137,8 @@ class AccountsPage(QWidget):
         if not name:
             return
         reply = QMessageBox.question(
-            self, "删除档案",
-            f"确定删除档案「{name}」吗？\n\n这只删除本地记录，不影响游戏内的数据。",
+            self, tr("删除档案"),
+            tr("确定删除档案「{name}」吗？", name=name) + "\n\n" + tr("这只删除本地记录，不影响游戏内的数据。"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

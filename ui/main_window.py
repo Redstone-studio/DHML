@@ -2,8 +2,10 @@
 
 from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 
+from core import i18n
 from core.accounts import AccountManager
 from core.app_info import APP_NAME
+from core.config import config
 from core.resources import resource_path, stylesheet_path
 from ui.dialogs.new_account_dialog import NewAccountDialog
 from ui.pages.accounts_page import AccountsPage
@@ -54,6 +56,7 @@ class MainWindow(QMainWindow):
         accounts_page.add_requested.connect(self.open_new_account_dialog)
 
         self.pages["settings"].config_changed.connect(self._on_config_changed)
+        self.pages["settings"].language_changed.connect(self.set_language)
 
         # ---------- 初始状态 ----------
         self.sidebar.set_account(self.account_manager.get_current())
@@ -73,6 +76,29 @@ class MainWindow(QMainWindow):
         # 切到版本页时刷新一下（那里显示的是完整清单）
         if key == "versions":
             page.reload_versions()
+
+    # ---------- 语言 ----------
+
+    def set_language(self, lang: str):
+        """切换界面语言（设置页调用）
+
+        做法是"逐页重设文字"，**不是**重建页面：
+
+        - 不重建控件 → 不会丢状态（当前页、选中的版本、搜索词都还在）
+        - 不会打断以后 v0.2 启动 / v0.4 下载这类长任务
+
+        代价是每个页面自己实现 retranslate()，其中动态生成的文字
+        （列表项、下拉项、带变量的文案）要自己重建。
+        静态文字只要是 self.label() / self.button() 建的，基类会自动重设。
+        """
+        if lang == i18n.current_language():
+            return
+        i18n.set_language(lang)
+        config.set("language", lang)
+
+        self.sidebar.retranslate()
+        for page in self.pages.values():
+            page.retranslate()
 
     # ---------- 样式 ----------
 
