@@ -24,9 +24,13 @@ LANG_DIR = ("assets", "lang")
 
 # 语言代码 → 显示名（设置页下拉框用）。没列到的语言直接显示代码本身。
 # 语言名按惯例用**该语言自己**写，所以这里的中文不需要翻译。
+# 这个字典的顺序就是下拉框里的顺序。
 LANGUAGE_NAMES = {
     "zh_CN": "简体中文",   # noqa: i18n
+    "zh_TW": "繁體中文",   # noqa: i18n
     "en_US": "English",
+    "ja_JP": "日本語",     # noqa: i18n
+    "ru_RU": "Русский",
 }
 
 _current_lang = FALLBACK_LANG
