@@ -164,3 +164,18 @@ QDialog {
 #PrimaryButton:hover {
     background-color: #4bb85a;
 }
+#RefreshButton {
+    background-color: #2a2c30;
+    border: 1px solid #3a3c40;
+    border-radius: 6px;
+    color: #d0d0d0;
+    font-size: 14px;
+}
+#RefreshButton:hover {
+    background-color: #34363a;
+    border-color: #7ed957;
+    color: #7ed957;
+}
+#RefreshButton:pressed {
+    background-color: #232428;
+}
