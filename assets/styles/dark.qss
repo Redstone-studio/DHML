@@ -1,0 +1,85 @@
+/* 全局 */
+QWidget {
+    background-color: #1e1f22;
+    color: #e6e6e6;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+}
+
+/* 侧边栏 */
+#Sidebar {
+    background-color: #16171a;
+    border-right: 1px solid #2a2c30;
+}
+
+#SidebarTitle {
+    font-size: 16px;
+    font-weight: bold;
+    color: #7ed957;
+    padding: 4px;
+}
+
+#SidebarVersion {
+    color: #555;
+    font-size: 11px;
+}
+
+/* 导航按钮 */
+#NavButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 14px;
+    text-align: left;
+    color: #b8b8b8;
+}
+#NavButton:hover {
+    background-color: #232428;
+    color: #ffffff;
+}
+#NavButton:checked {
+    background-color: #2a2c30;
+    color: #7ed957;
+    font-weight: bold;
+}
+
+/* 页面 */
+#PageTitle {
+    font-size: 24px;
+    font-weight: bold;
+    color: #ffffff;
+}
+#PageHint {
+    color: #777;
+}
+
+/* 启动按钮 */
+#LaunchButton {
+    background-color: #3fa34d;
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: bold;
+}
+#LaunchButton:hover {
+    background-color: #4bb85a;
+}
+#LaunchButton:pressed {
+    background-color: #348a40;
+}
+
+/* 下拉框与输入框 */
+QComboBox, QLineEdit {
+    background-color: #2a2c30;
+    border: 1px solid #3a3c40;
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: #e6e6e6;
+}
+QComboBox:hover, QLineEdit:focus {
+    border: 1px solid #7ed957;
+}
+QComboBox::drop-down {
+    border: none;
+}
