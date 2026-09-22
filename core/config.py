@@ -1,3 +1,15 @@
+"""全局配置（%APPDATA%/MCLuncher/config.json）
+
+注意：这个文件和 core/versions.py 之间存在双向的函数内 import
+（default_minecraft_dir 读 config，Config.get_minecraft_dir 又调
+default_minecraft_dir）。两边都是延迟导入，所以不会死循环，但它是个环形依赖，
+以后重构要小心。
+
+TODO(未修): load() 只保留 DEFAULT_CONFIG 里存在的键，配置文件里的未知键会被
+丢弃；而下一次 save() 会把整个 self.data 写回去，那些键就永久消失了。
+将来加字段后用户回退旧版本、或手动编辑过 config.json 时会丢配置。
+"""
+
 import json
 import os
 from pathlib import Path

@@ -1,12 +1,21 @@
+"""账户管理（%APPDATA%/MCLuncher/accounts.json）
+
+目前只有离线验证可用；正版 / 第三方验证只占了 UI 的位置。
+"""
+
+import hashlib
 import json
-import uuid
 import os
 from datetime import datetime
 from pathlib import Path
 
 
 def get_config_dir() -> Path:
-    """跨平台的配置目录"""
+    """跨平台的配置目录
+
+    （和 core/config.py 里的同名函数重复了。两边都硬编码了 "MCLuncher"
+    这个目录名，改的时候记得同时改。）
+    """
     if os.name == "nt":  # Windows
         base = Path(os.environ.get("APPDATA", Path.home()))
     else:
@@ -17,6 +26,19 @@ def get_config_dir() -> Path:
 
 
 ACCOUNTS_FILE = get_config_dir() / "accounts.json"
+
+# 账户类型的显示名
+TYPE_LABELS = {
+    "offline": "离线验证",
+    "microsoft": "正版验证",
+    "thirdparty": "第三方验证",
+}
+
+TYPE_ICONS = {
+    "offline": "✂",
+    "microsoft": "🛡",
+    "thirdparty": "🔗",
+}
 
 
 class AccountManager:
@@ -44,7 +66,6 @@ class AccountManager:
 
     def add_offline(self, name: str):
         # 生成离线 UUID（和 Minecraft 一致：基于 "OfflinePlayer:<name>" 的 MD5）
-        import hashlib
         md5 = hashlib.md5(f"OfflinePlayer:{name}".encode()).hexdigest()
         uuid_str = f"{md5[:8]}-{md5[8:12]}-{md5[12:16]}-{md5[16:20]}-{md5[20:]}"
 

@@ -1,90 +1,115 @@
-from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QStackedWidget
-)
-from ui.widgets.sidebar import Sidebar
-from ui.widgets.account_list import AccountList
-from ui.pages.home_page import HomePage
-from ui.pages.versions_page import VersionsPage
-from ui.pages.settings_page import SettingsPage
-from ui.dialogs.new_account_dialog import NewAccountDialog
+"""主窗口：侧边栏 + 页面堆栈"""
+
+from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QWidget
+
 from core.accounts import AccountManager
+from core.app_info import APP_NAME
+from core.resources import stylesheet_path
+from ui.dialogs.new_account_dialog import NewAccountDialog
+from ui.pages.accounts_page import AccountsPage
+from ui.pages.home_page import HomePage
+from ui.pages.settings_page import SettingsPage
+from ui.pages.versions_page import VersionsPage
+from ui.widgets.sidebar import Sidebar
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("MC Launcher")
-        self.resize(1000, 640)
-        self.setMinimumSize(800, 520)
+        self.setWindowTitle(APP_NAME)
+        self.resize(1080, 700)
+        self.setMinimumSize(900, 580)
 
-        # ---------- 1. 中央部件 & 主布局 ----------
-        central = QWidget()
-        self.setCentralWidget(central)
-        layout = QHBoxLayout(central)
+        self.account_manager = AccountManager()
+
+        root = QWidget()
+        root.setObjectName("Root")
+        self.setCentralWidget(root)
+        layout = QHBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # ---------- 2. 侧边栏 ----------
         self.sidebar = Sidebar()
+        layout.addWidget(self.sidebar)
 
-        # ---------- 3. 账户管理 ----------
-        self.account_manager = AccountManager()
-        self.account_list = AccountList(self.account_manager)
-        self.account_list.add_requested.connect(self.open_new_account_dialog)
-        self.account_list.account_selected.connect(self.on_account_changed)
-
-        # ---------- 4. 页面堆栈 ----------
         self.stack = QStackedWidget()
+        self.stack.setObjectName("PageStack")
+        layout.addWidget(self.stack, 1)
+
         self.pages = {
-            "home": HomePage(),
+            "home": HomePage(self.account_manager),
             "versions": VersionsPage(),
+            "accounts": AccountsPage(self.account_manager),
             "settings": SettingsPage(),
         }
         for page in self.pages.values():
             self.stack.addWidget(page)
 
-        # ---------- 4b. 设置页改了配置 → 首页刷新 ----------
+        # ---------- 信号 ----------
+        self.sidebar.page_changed.connect(self.switch_page)
+        self.sidebar.account_clicked.connect(lambda: self.switch_page("accounts"))
+
+        accounts_page = self.pages["accounts"]
+        accounts_page.accounts_changed.connect(self._on_accounts_changed)
+        accounts_page.add_requested.connect(self.open_new_account_dialog)
+
         self.pages["settings"].config_changed.connect(self._on_config_changed)
 
-        # ---------- 5. 加入布局（侧边栏 | 账户列表 | 内容） ----------
-        layout.addWidget(self.sidebar)
-        layout.addWidget(self.account_list)
-        layout.addWidget(self.stack, 1)
+        # ---------- 初始状态 ----------
+        self.sidebar.set_account(self.account_manager.get_current())
+        self.pages["home"].set_account(self.account_manager.get_current())
+        self.switch_page("home")
 
-        # ---------- 6. 信号连接 ----------
-        self.sidebar.page_changed.connect(self.switch_page)
-
-        # ---------- 7. 加载样式 ----------
         self.load_styles()
 
+    # ---------- 导航 ----------
+
     def switch_page(self, key: str):
-        if key in self.pages:
-            self.stack.setCurrentWidget(self.pages[key])
+        page = self.pages.get(key)
+        if page is None:
+            return
+        self.stack.setCurrentWidget(page)
+        self.sidebar.set_active(key)
+        # 切到版本页时刷新一下（那里显示的是完整清单）
+        if key == "versions":
+            page.reload_versions()
+
+    # ---------- 样式 ----------
 
     def load_styles(self):
+        """加载 QSS
+
+        路径交给 core/resources.py 统一解析（打包后是 <exe>/_internal/assets/...）。
+        绝对不要写 open("assets/styles/dark.qss") —— 那是 0.0.x 系列里
+        样式一直不生效的根因，而且异常被静默吞掉之后极难排查。
+        """
+        path = stylesheet_path()
         try:
-            with open("assets/styles/dark.qss", "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
-        except FileNotFoundError:
-            pass
+            self.setStyleSheet(path.read_text(encoding="utf-8"))
+        except OSError as e:
+            # 不静默吞掉：样式丢了是肉眼可见的问题，至少留条线索
+            print(f"[UI] 样式加载失败: {path} ({e})")
+
+    # ---------- 账户 ----------
 
     def open_new_account_dialog(self):
         dlg = NewAccountDialog(self)
         if dlg.exec():
             if dlg.result_account:
-                typ, name = dlg.result_account
+                _type, name = dlg.result_account
                 self.account_manager.add_offline(name)
-                self.account_list.refresh()
-                self.on_account_changed(name)
+                self._on_accounts_changed()
 
-    def on_account_changed(self, name: str):
-        print(f"[UI] 切换账户: {name}")
-        home = self.pages["home"]
-        if hasattr(home, "username_input"):
-            home.username_input.setText(name)
+    def _on_accounts_changed(self):
+        """账户列表变了：账户页、侧边栏卡片、首页的档案显示都要跟着更新"""
+        current = self.account_manager.get_current()
+        self.pages["accounts"].reload()
+        self.sidebar.set_account(current)
+        self.pages["home"].set_account(current)
+
+    # ---------- 配置 ----------
 
     def _on_config_changed(self):
-        """设置页改了 MC 目录等配置后，让首页重新扫描版本"""
-        home = self.pages["home"]
-        if hasattr(home, "reset_scanner"):
-            home.reset_scanner()
+        """设置页改了游戏目录：所有跟版本相关的页面都要重新扫描"""
+        self.pages["home"].reset_scanner()
+        self.pages["versions"].reset_scanner()

@@ -1,109 +1,146 @@
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QButtonGroup, QRadioButton, QWidget   # ← 加上 QWidget
-)
-from PyQt6.QtCore import Qt
+"""新建档案对话框
+
+相对旧版的改动：
+- 去掉 setFixedSize：固定尺寸配两行文字的 radio 很容易挤，改成最小宽度
+- 选了未实现的验证方式时，直接把「继续」禁用掉，比点了之后弹提示清楚
+- 去掉没用到的 Qt 导入
+"""
+
 import re
+
+from PyQt6.QtWidgets import (
+    QButtonGroup, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QRadioButton, QVBoxLayout, QWidget
+)
+
+NAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,16}$")
+
+ACCOUNT_TYPES = (
+    ("microsoft", "\U0001f6e1  正版验证", "使用微软账户登录"),
+    ("thirdparty", "\U0001f517  第三方验证", "使用 authlib-injector 服务器"),
+    ("offline", "\u2702  离线验证", "仅本地使用，无需登录"),
+)
 
 
 class NewAccountDialog(QDialog):
-    """新建档案 - 选择验证类型 + 填信息"""
+    """新建档案：选择验证类型 + 填信息"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("新建档案")
         self.setModal(True)
-        self.setFixedSize(420, 360)
+        self.setMinimumWidth(460)
 
-        self.result_account = None  # 成功后填 (type, name)
+        # 成功后填 (type, name)
+        self.result_account = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(14)
+        layout.setSpacing(12)
 
-        title = QLabel("新建档案 - 选择验证类型")
+        title = QLabel("新建档案")
         title.setObjectName("DialogTitle")
         layout.addWidget(title)
 
-        # 三个验证类型
+        layout.addWidget(self._field_label("选择验证方式"))
+
         self.type_group = QButtonGroup(self)
         self.type_buttons = {}
-        types = [
-            ("microsoft", "🛡  正版验证", "使用微软账户登录（暂未实现）"),
-            ("thirdparty", "🔗  第三方验证", "使用 authlib-injector 服务器（暂未实现）"),
-            ("offline", "✂  离线验证", "仅本地使用，无需登录"),
-        ]
-        for key, text, hint in types:
-            btn = QRadioButton(f"{text}\n{hint}")
-            btn.setObjectName("TypeRadio")
-            btn.setProperty("key", key)
-            self.type_group.addButton(btn)
-            self.type_buttons[key] = btn
-            layout.addWidget(btn)
+        for key, text, hint in ACCOUNT_TYPES:
+            button = QRadioButton(f"{text}      {hint}")
+            button.setProperty("key", key)
+            self.type_group.addButton(button)
+            self.type_buttons[key] = button
+            layout.addWidget(button)
 
-        self.type_buttons["offline"].setChecked(True)  # 默认离线
+        self.type_buttons["offline"].setChecked(True)
+
+        layout.addSpacing(4)
+
+        # 玩家名（只有离线模式需要）
+        self.name_row = QWidget()
+        name_layout = QHBoxLayout(self.name_row)
+        name_layout.setContentsMargins(0, 0, 0, 0)
+        name_layout.setSpacing(10)
+        name_layout.addWidget(self._field_label("玩家名"))
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("3-16 位，只能字母、数字、下划线")
+        self.name_input.textChanged.connect(self._validate)
+        name_layout.addWidget(self.name_input, 1)
+        layout.addWidget(self.name_row)
+
+        self.hint = QLabel()
+        self.hint.setObjectName("HintText")
+        self.hint.setWordWrap(True)
+        self.hint.setMinimumHeight(34)
+        layout.addWidget(self.hint)
 
         layout.addSpacing(6)
 
-        # 玩家名输入（离线用）
-        self.name_row = QWidget()
-        nr = QHBoxLayout(self.name_row)
-        nr.setContentsMargins(0, 0, 0, 0)
-        nr.addWidget(QLabel("玩家名:"))
-        self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("仅允许字母数字下划线，3-16 位")
-        nr.addWidget(self.name_input, 1)
-        layout.addWidget(self.name_row)
-
-        # 提示
-        self.hint = QLabel("离线模式：名字只用于本地游戏内显示")
-        self.hint.setObjectName("DialogHint")
-        layout.addWidget(self.hint)
-
-        layout.addStretch()
-
-        # 底部按钮
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        self.cancel_btn = QPushButton("取消")
-        self.cancel_btn.clicked.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(cancel_btn)
         self.ok_btn = QPushButton("继续")
         self.ok_btn.setObjectName("PrimaryButton")
         self.ok_btn.setDefault(True)
         self.ok_btn.clicked.connect(self._on_ok)
-        btn_row.addWidget(self.cancel_btn)
-        btn_row.addWidget(self.ok_btn)
-        layout.addLayout(btn_row)
+        buttons.addWidget(self.ok_btn)
+        layout.addLayout(buttons)
 
-        # 选择类型时更新提示
         self.type_group.buttonClicked.connect(self._on_type_changed)
+        self._on_type_changed(self.type_buttons["offline"])
 
-    def _on_type_changed(self, btn):
-        key = btn.property("key")
-        if key == "offline":
-            self.name_row.setVisible(True)
-            self.hint.setText("离线模式：名字只用于本地游戏内显示")
-        elif key == "microsoft":
-            self.name_row.setVisible(False)
-            self.hint.setText("⚠️ 微软登录功能尚未实现，敬请期待")
-        else:
-            self.name_row.setVisible(False)
-            self.hint.setText("⚠️ 第三方验证功能尚未实现，敬请期待")
-
-    def _on_ok(self):
-        key = self.type_group.checkedButton().property("key")
-
-        if key == "offline":
-            name = self.name_input.text().strip()
-            if not self._valid_name(name):
-                self.hint.setText("❌ 名字不合法：3-16 位字母数字下划线")
-                return
-            self.result_account = ("offline", name)
-            self.accept()
-        else:
-            self.hint.setText("⚠️ 该验证方式暂未实现")
-            return
+    # ---------- 内部 ----------
 
     @staticmethod
-    def _valid_name(name: str) -> bool:
-        return bool(re.match(r"^[A-Za-z0-9_]{3,16}$", name))
+    def _field_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("FieldLabel")
+        return label
+
+    def _current_key(self) -> str:
+        button = self.type_group.checkedButton()
+        return button.property("key") if button else "offline"
+
+    def _on_type_changed(self, _button):
+        key = self._current_key()
+        is_offline = key == "offline"
+
+        self.name_row.setVisible(is_offline)
+        self.ok_btn.setEnabled(is_offline)
+
+        if is_offline:
+            self.hint.setText("离线模式：名字只用于本地游戏内显示，不联网验证。")
+        elif key == "microsoft":
+            self.hint.setText("\u26a0 微软登录尚未实现，该选项暂不可用。")
+        else:
+            self.hint.setText("\u26a0 第三方验证尚未实现，该选项暂不可用。")
+
+        if is_offline:
+            self._validate()
+
+    def _validate(self):
+        if self._current_key() != "offline":
+            return
+        name = self.name_input.text().strip()
+        if not name:
+            self.hint.setText("离线模式：名字只用于本地游戏内显示，不联网验证。")
+            self.ok_btn.setEnabled(False)
+        elif not NAME_PATTERN.match(name):
+            self.hint.setText("\u274c 名字不合法：需要 3-16 位字母、数字或下划线")
+            self.ok_btn.setEnabled(False)
+        else:
+            self.hint.setText("离线模式：名字只用于本地游戏内显示，不联网验证。")
+            self.ok_btn.setEnabled(True)
+
+    def _on_ok(self):
+        if self._current_key() != "offline":
+            return
+        name = self.name_input.text().strip()
+        if not NAME_PATTERN.match(name):
+            self.hint.setText("\u274c 名字不合法：需要 3-16 位字母、数字或下划线")
+            return
+        self.result_account = ("offline", name)
+        self.accept()

@@ -46,6 +46,8 @@ _ISOLATED_MARKERS = (
 )
 
 # 加载器识别。顺序即优先级：neoforge 必须排在 forge 前面，否则会被 forge 抢先命中。
+# 第三个字段是给界面显示的品牌名 —— 不要用 str.capitalize() 去凑，
+# 那会把 NeoForge 变成 "Neoforge"、OptiFine 变成 "Optifine"。
 _LOADER_PATTERNS = (
     ("neoforge", "NeoForge", r"neoforge"),
     ("forge", "Forge", r"forge"),
@@ -56,6 +58,8 @@ _LOADER_PATTERNS = (
     ("liteloader", "LiteLoader", r"liteloader"),
 )
 
+_LOADER_LABELS = {key: label for key, label, _pattern in _LOADER_PATTERNS}
+
 # 纯版本号文件夹名，如 1.20.1 / 1.7.10
 _PLAIN_VERSION_RE = re.compile(r"^\d+\.\d+(\.\d+)?$")
 
@@ -64,6 +68,15 @@ _NON_RELEASE_OFFICIAL = ("snapshot", "old_beta", "old_alpha")
 
 # 分类优先级：官方版本 → 加载器版本 → 整合包 / 认不出来的
 _KIND_RANK = {"vanilla": 0, "loader": 1, "pack": 2}
+
+# 版本类型的显示名
+TYPE_LABELS = {
+    "release": "正式版",
+    "snapshot": "快照",
+    "old_beta": "远古 Beta",
+    "old_alpha": "远古 Alpha",
+    "unknown": "未知",
+}
 
 # 排序用的版本类型优先级，越小越靠前
 _TYPE_RANK = {"release": 0, "snapshot": 1, "old_beta": 2, "old_alpha": 3}
@@ -168,7 +181,8 @@ class VersionScanner:
             type          str        release / snapshot / old_beta / old_alpha / unknown
             dir_name      str        版本文件夹名（可能和 id 不一样）
             display_name  str        给 UI 显示的名字
-            loader        str|None   主加载器：forge / fabric / neoforge / optifine ...
+            loader        str|None   主加载器 key：forge / fabric / neoforge / optifine ...
+            loader_label  str|None   主加载器的显示名：Forge / Fabric / NeoForge ...
             loaders       list[str]  命中的所有加载器
             path          Path       版本文件夹
             jar           Path|None  客户端 jar，模组版本可能是 None
@@ -245,6 +259,7 @@ class VersionScanner:
             "dir_name": dir_path.name,
             "display_name": dir_path.name if dir_path.name != version_id else version_id,
             "loader": loaders[0] if loaders else None,
+            "loader_label": _LOADER_LABELS.get(loaders[0]) if loaders else None,
             "loaders": loaders,
             "path": dir_path,
             "jar": jar,
@@ -329,7 +344,7 @@ class VersionScanner:
 
     @staticmethod
     def _classify(dir_name: str, loaders: "list[str]", version_type: str) -> str:
-        """把版本分成三类，决定下拉框里的分段
+        """把版本分成三类，决定下拉框 / 列表里的分段
 
         vanilla: 官方版本（没加载器，文件夹名是纯版本号，或者是快照）
         loader:  带加载器的版本（Forge / Fabric / NeoForge ...）
