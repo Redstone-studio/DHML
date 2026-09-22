@@ -42,6 +42,13 @@ QLabel {
     background-color: transparent;
 }
 
+/* 同理：勾选框和单选框自己也是 QWidget，会带上页面底色。
+   放在卡片上时（设置页的"启动游戏后关闭启动器"）就会露出一块深色。 */
+QCheckBox,
+QRadioButton {
+    background-color: transparent;
+}
+
 QMainWindow, #Root {
     background-color: #0f1012;
 }
@@ -583,6 +590,72 @@ QScrollBar::add-page, QScrollBar::sub-page {
     color: #e0b341;
     padding: 3px 9px;
     font-size: 12px;
+}
+
+/* ==================== 版本列表（卡片式，参考 PCL2） ====================
+   从 QTableWidget 换过来的原因：表格选中一行时，每个单元格各画各的选中背景，
+   看起来高亮被切成好几段。卡片列表整行连续高亮，还能一行放"名称 + 元信息"。 */
+
+#VersionList {
+    background-color: transparent;
+    border: none;
+    outline: none;
+}
+/* 关键：item 不能留 margin / 圆角断层，否则高亮又会断开 */
+#VersionList::item {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    margin: 2px 0;
+    padding: 0;
+}
+#VersionList::item:hover {
+    background-color: #26282d;
+}
+#VersionList::item:selected {
+    background-color: #24361f;
+    border-color: #37522f;
+}
+
+#VersionGroupTitle {
+    color: #6e7076;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 14px 0 6px 10px;
+}
+#VersionRowName {
+    color: #e9e9ec;
+    font-size: 14px;
+    font-weight: bold;
+}
+#VersionRowMeta {
+    color: #6e7076;
+    font-size: 12px;
+}
+
+#BadgeVanilla {
+    background-color: #24361f;
+    border: 1px solid #37522f;
+    border-radius: 10px;
+    color: #8fd49a;
+    font-size: 13px;
+    font-weight: bold;
+}
+#BadgeLoader {
+    background-color: #33290f;
+    border: 1px solid #5c4a1a;
+    border-radius: 10px;
+    color: #e0b341;
+    font-size: 13px;
+    font-weight: bold;
+}
+#BadgePack {
+    background-color: #1e2a3d;
+    border: 1px solid #2f4260;
+    border-radius: 10px;
+    color: #7fb0ee;
+    font-size: 13px;
+    font-weight: bold;
 }
 
 /* ============================ 对话框 ============================ */

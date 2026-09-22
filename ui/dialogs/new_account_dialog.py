@@ -8,17 +8,23 @@
 
 import re
 
+from PyQt6.QtCore import QSize
 from PyQt6.QtWidgets import (
     QButtonGroup, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QRadioButton, QVBoxLayout, QWidget
 )
 
+from ui.icons import icon
+
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,16}$")
 
+# (类型, 图标名, 标题, 说明)
+# 图标是 assets/icons/*.svg。不要用 emoji —— 🛡🔗✂ 的渲染取决于系统字体，
+# 大小和基线都不受我们控制，会跟旁边的文字对不齐。
 ACCOUNT_TYPES = (
-    ("microsoft", "\U0001f6e1  正版验证", "使用微软账户登录"),
-    ("thirdparty", "\U0001f517  第三方验证", "使用 authlib-injector 服务器"),
-    ("offline", "\u2702  离线验证", "仅本地使用，无需登录"),
+    ("microsoft", "shield", "正版验证", "使用微软账户登录"),
+    ("thirdparty", "network", "第三方验证", "使用 authlib-injector 服务器"),
+    ("offline", "offline", "离线验证", "仅本地使用，无需登录"),
 )
 
 
@@ -46,8 +52,10 @@ class NewAccountDialog(QDialog):
 
         self.type_group = QButtonGroup(self)
         self.type_buttons = {}
-        for key, text, hint in ACCOUNT_TYPES:
+        for key, icon_name, text, hint in ACCOUNT_TYPES:
             button = QRadioButton(f"{text}      {hint}")
+            button.setIcon(icon(icon_name))
+            button.setIconSize(QSize(18, 18))
             button.setProperty("key", key)
             self.type_group.addButton(button)
             self.type_buttons[key] = button
