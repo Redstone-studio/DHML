@@ -83,3 +83,84 @@ QComboBox:hover, QLineEdit:focus {
 QComboBox::drop-down {
     border: none;
 }
+/* 账户面板 */
+#AccountPanel {
+    background-color: #1a1b1e;
+    border-right: 1px solid #2a2c30;
+    min-width: 180px;
+    max-width: 220px;
+}
+#PanelTitle {
+    color: #888;
+    font-size: 12px;
+    font-weight: bold;
+    padding-left: 4px;
+}
+#AccountList {
+    background-color: transparent;
+    border: none;
+    outline: none;
+    color: #d0d0d0;
+}
+#AccountList::item {
+    padding: 8px 6px;
+    border-radius: 6px;
+}
+#AccountList::item:selected {
+    background-color: #2a2c30;
+    color: #7ed957;
+}
+#AccountList::item:hover {
+    background-color: #232428;
+}
+
+#AddAccountButton {
+    background-color: #2a2c30;
+    border: 1px solid #3a3c40;
+    border-radius: 8px;
+    color: #7ed957;
+    font-size: 18px;
+    font-weight: bold;
+}
+#AddAccountButton:hover {
+    background-color: #34363a;
+    border-color: #7ed957;
+}
+
+/* 弹窗 */
+QDialog {
+    background-color: #1e1f22;
+}
+#DialogTitle {
+    font-size: 16px;
+    font-weight: bold;
+    color: #4a9eff;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #2a2c30;
+}
+#TypeRadio {
+    padding: 8px;
+    border-radius: 6px;
+    color: #d0d0d0;
+}
+#TypeRadio:hover {
+    background-color: #232428;
+}
+#TypeRadio:checked {
+    color: #7ed957;
+}
+#DialogHint {
+    color: #888;
+    font-size: 12px;
+}
+#PrimaryButton {
+    background-color: #3fa34d;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 18px;
+    font-weight: bold;
+}
+#PrimaryButton:hover {
+    background-color: #4bb85a;
+}
