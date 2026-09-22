@@ -1,35 +1,101 @@
-"""版本页：本地版本清单
+"""版本页：本地版本清单（卡片式）
 
-旧版本这个页面只有一个"（待实现）"标签，现在做成真正的清单 + 搜索 + 筛选。
+从 QTableWidget 换成 QListWidget + 自定义行控件，原因有两个：
+1. 表格选中一行时，每个单元格各画各的选中背景，高亮会被切成好几段，观感很差
+2. 卡片式一行能放下"名称 + 元信息 + 徽章"，跟 PCL2 的版本列表观感一致
+
+两个 Qt 细节（都踩过）：
+- 行控件是普通 QWidget 子类，默认不绘制 QSS 背景 —— 正好让 QListWidget 的
+  选中底色透出来，不用额外设透明
+- 行控件必须设 WA_TransparentForMouseEvents，否则鼠标事件被它吃掉，
+  点上去根本选不中（setItemWidget 的经典坑）
 """
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+    QComboBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QPushButton, QVBoxLayout, QWidget
 )
 
 from core.versions import TYPE_LABELS, VersionScanner
 
-KIND_FILTERS = (
-    ("all", "全部"),
+# 分组顺序 + 标题
+GROUPS = (
     ("vanilla", "官方版本"),
     ("loader", "加载器版本"),
     ("pack", "整合包"),
 )
 
-KIND_LABELS = {
-    "vanilla": "官方",
-    "loader": "加载器",
-    "pack": "整合包",
+KIND_FILTERS = (("all", "全部"),) + GROUPS
+
+ROW_HEIGHT = 62
+
+_BADGE_NAMES = {
+    "vanilla": "BadgeVanilla",
+    "loader": "BadgeLoader",
+    "pack": "BadgePack",
 }
 
-COLUMNS = ("名称", "类型", "加载器", "Java", "状态")
 
-_COLOR_OK = QColor("#8fd49a")
-_COLOR_WARN = QColor("#e0b341")
-_COLOR_DIM = QColor("#6e7076")
+class _VersionRow(QWidget):
+    """一行版本：左侧色块徽章 + 名称/元信息 + 右侧标签"""
+
+    def __init__(self, version: dict):
+        super().__init__()
+        # 让点击穿透到 QListWidget，否则选中功能整个失效
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 6, 12, 6)
+        layout.setSpacing(12)
+
+        badge = QLabel(self._badge_text(version))
+        badge.setObjectName(_BADGE_NAMES.get(version["kind"], "Badge"))
+        badge.setFixedSize(38, 38)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(badge)
+
+        text_box = QVBoxLayout()
+        text_box.setContentsMargins(0, 0, 0, 0)
+        text_box.setSpacing(2)
+
+        name = QLabel(version["display_name"])
+        name.setObjectName("VersionRowName")
+        text_box.addWidget(name)
+
+        meta = QLabel(self._meta_text(version))
+        meta.setObjectName("VersionRowMeta")
+        text_box.addWidget(meta)
+
+        layout.addLayout(text_box, 1)
+
+        if not version["complete"]:
+            tag = QLabel("\u26a0 缺少 jar")
+            tag.setObjectName("BadgeWarn")
+            layout.addWidget(tag)
+        elif version["loader_label"]:
+            tag = QLabel(version["loader_label"])
+            tag.setObjectName("BadgeAccent")
+            layout.addWidget(tag)
+
+    @staticmethod
+    def _badge_text(version: dict) -> str:
+        if version["kind"] == "pack":
+            return "包"
+        if version["kind"] == "loader":
+            return (version["loader"] or "")[:2].upper()
+        return "原"
+
+    @staticmethod
+    def _meta_text(version: dict) -> str:
+        parts = [TYPE_LABELS.get(version["type"], version["type"])]
+        if version["java_major"]:
+            parts.append(f"Java {version['java_major']}")
+        if version["isolated"]:
+            parts.append("版本隔离")
+        if version["dir_name"] != version["display_name"]:
+            parts.append(version["dir_name"])
+        return "    ·    ".join(parts)
 
 
 class VersionsPage(QWidget):
@@ -65,7 +131,7 @@ class VersionsPage(QWidget):
         self.kind_filter = QComboBox()
         for key, text in KIND_FILTERS:
             self.kind_filter.addItem(text, key)
-        self.kind_filter.setMinimumWidth(120)
+        self.kind_filter.setMinimumWidth(130)
         self.kind_filter.currentIndexChanged.connect(self._apply_filter)
         bar.addWidget(self.kind_filter)
 
@@ -74,29 +140,19 @@ class VersionsPage(QWidget):
         bar.addWidget(self.refresh_btn)
 
         layout.addLayout(bar)
-        layout.addSpacing(6)
 
-        # ---------- 表格 ----------
-        self.table = QTableWidget(0, len(COLUMNS))
-        self.table.setHorizontalHeaderLabels(list(COLUMNS))
-        self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # ---------- 卡片列表 ----------
+        self.list = QListWidget()
+        self.list.setObjectName("VersionList")
+        self.list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self.list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list.currentItemChanged.connect(self._on_selection_changed)
+        layout.addWidget(self.list, 1)
 
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, len(COLUMNS)):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-        layout.addWidget(self.table, 1)
-
-        self.empty_label = QLabel("没有找到本地版本")
-        self.empty_label.setObjectName("EmptyState")
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.hide()
-        layout.addWidget(self.empty_label)
+        self.footer = QLabel()
+        self.footer.setObjectName("HintText")
+        layout.addWidget(self.footer)
 
         self.reload_versions()
 
@@ -123,7 +179,7 @@ class VersionsPage(QWidget):
                 continue
             rows.append(version)
 
-        self._fill_table(rows)
+        self._fill_list(rows)
 
         total = len(self.versions)
         if not total:
@@ -133,45 +189,47 @@ class VersionsPage(QWidget):
         else:
             self.subtitle.setText(f"共 {total} 个本地版本，符合筛选的 {len(rows)} 个")
 
-    def _fill_table(self, rows):
-        self.table.setRowCount(0)
+    # ---------- 列表构建 ----------
 
-        for version in rows:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
+    def _fill_list(self, rows):
+        self.list.clear()
+        first_version_row = None
 
-            name_item = QTableWidgetItem(version["display_name"])
-            name_item.setToolTip(str(version["path"]))
-            self.table.setItem(row, 0, name_item)
+        for kind, title in GROUPS:
+            group = [v for v in rows if v["kind"] == kind]
+            if not group:
+                continue
+            self._add_group_header(title, len(group))
+            for version in group:
+                self._add_version_item(version)
+                if first_version_row is None:
+                    first_version_row = self.list.count() - 1
 
-            type_text = TYPE_LABELS.get(version["type"], version["type"])
-            kind_text = KIND_LABELS.get(version["kind"], "")
-            type_item = QTableWidgetItem(f"{type_text} · {kind_text}" if kind_text else type_text)
-            type_item.setForeground(_COLOR_DIM)
-            self.table.setItem(row, 1, type_item)
+        if first_version_row is not None:
+            self.list.setCurrentRow(first_version_row)
+        self.footer.setText("")
 
-            loader_item = QTableWidgetItem(version["loader_label"] or "—")
-            loader_item.setForeground(_COLOR_OK if version["loader_label"] else _COLOR_DIM)
-            self.table.setItem(row, 2, loader_item)
+    def _add_group_header(self, title: str, count: int):
+        item = QListWidgetItem()
+        item.setFlags(Qt.ItemFlag.NoItemFlags)      # 分组标题不可选中
+        item.setSizeHint(QSize(0, 36))
+        self.list.addItem(item)
 
-            java_item = QTableWidgetItem(
-                str(version["java_major"]) if version["java_major"] else "—"
-            )
-            java_item.setForeground(_COLOR_DIM)
-            self.table.setItem(row, 3, java_item)
+        label = QLabel(f"{title}    {count}")
+        label.setObjectName("VersionGroupTitle")
+        self.list.setItemWidget(item, label)
 
-            if version["complete"]:
-                status_item = QTableWidgetItem("可启动")
-                status_item.setForeground(_COLOR_OK)
-            else:
-                status_item = QTableWidgetItem("\u26a0 缺少 jar")
-                status_item.setForeground(_COLOR_WARN)
-                status_item.setToolTip("客户端 jar 不在，无法启动；请用 PCL / HMCL 重新安装")
-            self.table.setItem(row, 4, status_item)
+    def _add_version_item(self, version: dict):
+        item = QListWidgetItem()
+        item.setData(Qt.ItemDataRole.UserRole, version)
+        item.setSizeHint(QSize(0, ROW_HEIGHT))
+        item.setToolTip(str(version["path"]))
+        self.list.addItem(item)
+        self.list.setItemWidget(item, _VersionRow(version))
 
-        self.table.setVisible(bool(rows))
-        self.empty_label.setVisible(not rows)
-        if not rows:
-            self.empty_label.setText(
-                "没有符合筛选条件的版本" if self.versions else "没有扫描到本地版本"
-            )
+    def _on_selection_changed(self, current, _previous):
+        version = current.data(Qt.ItemDataRole.UserRole) if current else None
+        if isinstance(version, dict):
+            self.footer.setText(f"位置：{version['path']}")
+        else:
+            self.footer.setText("")

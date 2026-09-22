@@ -79,6 +79,11 @@ class Sidebar(QWidget):
     def __init__(self):
         super().__init__()
         self.setObjectName("Sidebar")
+        # 关键：纯 QWidget 子类默认不绘制 QSS 里的 background-color / border，
+        # 必须打开 WA_StyledBackground，否则 #Sidebar 的背景色和右边框全部无效
+        # （表现为侧边栏露出窗口底色，比预期更黑）。
+        # 卡片用的是 QFrame，QFrame 自带这个行为，所以一直正常。
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedWidth(224)
 
         layout = QVBoxLayout(self)

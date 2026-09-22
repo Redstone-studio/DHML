@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 
 from core.accounts import AccountManager
 from core.app_info import APP_NAME
-from core.resources import stylesheet_path
+from core.resources import resource_path, stylesheet_path
 from ui.dialogs.new_account_dialog import NewAccountDialog
 from ui.pages.accounts_page import AccountsPage
 from ui.pages.home_page import HomePage
@@ -85,10 +85,17 @@ class MainWindow(QMainWindow):
         """
         path = stylesheet_path()
         try:
-            self.setStyleSheet(path.read_text(encoding="utf-8"))
+            qss = path.read_text(encoding="utf-8")
         except OSError as e:
             # 不静默吞掉：样式丢了是肉眼可见的问题，至少留条线索
             print(f"[UI] 样式加载失败: {path} ({e})")
+            return
+
+        # QSS 里的 @ICONS@ 要换成图标目录的绝对路径。
+        # Qt 的 url() 相对路径是按「当前工作目录」解析的，不是按 qss 文件位置，
+        # 打包成 exe 之后工作目录一变图标就全丢了。
+        qss = qss.replace("@ICONS@", resource_path("assets", "icons").as_posix())
+        self.setStyleSheet(qss)
 
     # ---------- 账户 ----------
 

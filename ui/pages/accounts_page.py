@@ -6,15 +6,18 @@
 另外这里刻意**没有**连接 QListWidget.currentItemChanged —— 旧代码那样做会导致
 每次 refresh() 里的 setCurrentItem 都触发 set_current + 写盘，并在刷新时重复
 发信号。现在改成显式的「设为当前」按钮。
+
+图标用 assets/icons/*.svg（见 ui/icons.py），不用 emoji。
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox,
     QPushButton, QVBoxLayout, QWidget
 )
 
-from core.accounts import TYPE_ICONS, TYPE_LABELS
+from core.accounts import TYPE_LABELS
+from ui.icons import ACCOUNT_TYPE_ICONS, icon
 
 
 class AccountsPage(QWidget):
@@ -40,6 +43,8 @@ class AccountsPage(QWidget):
         layout.addSpacing(14)
 
         self.list = QListWidget()
+        self.list.setObjectName("AccountList")
+        self.list.setIconSize(QSize(20, 20))
         layout.addWidget(self.list, 1)
 
         self.empty_label = QLabel("还没有任何档案，点下面的「新建档案」开始")
@@ -82,6 +87,7 @@ class AccountsPage(QWidget):
         for account in self.manager.accounts:
             item = QListWidgetItem(self._format(account, account["name"] == current))
             item.setData(Qt.ItemDataRole.UserRole, account["name"])
+            item.setIcon(icon(ACCOUNT_TYPE_ICONS.get(account.get("type"), "offline")))
             self.list.addItem(item)
 
         # 恢复选中：优先恢复刷新前选中的那一项，否则选当前档案
@@ -101,12 +107,11 @@ class AccountsPage(QWidget):
 
     @staticmethod
     def _format(account: dict, is_current: bool) -> str:
-        icon = TYPE_ICONS.get(account.get("type"), "\U0001f464")
         type_label = TYPE_LABELS.get(account.get("type"), "未知")
         uuid_text = str(account.get("uuid", ""))
         short_uuid = f"{uuid_text[:8]}…" if uuid_text else "—"
         mark = "      ← 当前使用" if is_current else ""
-        return f"{icon}    {account.get('name', '?')}{mark}\n       {type_label}    {short_uuid}"
+        return f"{account.get('name', '?')}{mark}\n{type_label}    {short_uuid}"
 
     def _selected_name(self):
         item = self.list.currentItem()
