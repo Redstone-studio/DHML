@@ -98,6 +98,12 @@ class HomePage(QWidget):
         # 默认选最新正式版（列表已排序，第一个就是）
         self.version_combo.setCurrentIndex(0)
 
+        def reset_scanner(self):
+        """配置变更后重建 scanner"""
+        from core.versions import VersionScanner
+        self.scanner = VersionScanner()
+        self.reload_versions()
+        
     @staticmethod
     def _format_label(v: dict) -> str:
         """把版本信息格式化成下拉框里的文字"""
