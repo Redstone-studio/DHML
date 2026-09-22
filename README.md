@@ -43,7 +43,7 @@ assets/styles/dark.qss      深色主题（调色板在文件顶部）
 
 ## 还没做
 
-- `v0.2.0-alpha` 拼 Java 命令并真正启动游戏
-- `v0.3.0-alpha` 设置页补 Java 路径（按版本挑 Java 8 / 17 / 21）
-- `v0.4.0-beta` 从 Mojang 拉版本清单下载
+- `v0.3.0-alpha` 拼 Java 命令并真正启动游戏
+- `v0.4.0-alpha` 设置页补 Java 路径（按版本挑 Java 8 / 17 / 21）
+- `v0.5.0-beta` 从 Mojang 拉版本清单下载
 - 正版验证 / 第三方验证（UI 占了位，逻辑没实现）
