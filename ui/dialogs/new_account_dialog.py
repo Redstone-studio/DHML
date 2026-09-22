@@ -1,8 +1,9 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QButtonGroup, QRadioButton, QFrame, QStackedWidget
+    QLineEdit, QButtonGroup, QRadioButton, QWidget   # ← 加上 QWidget
 )
 from PyQt6.QtCore import Qt
+import re
 
 
 class NewAccountDialog(QDialog):
@@ -105,5 +106,4 @@ class NewAccountDialog(QDialog):
 
     @staticmethod
     def _valid_name(name: str) -> bool:
-        import re
         return bool(re.match(r"^[A-Za-z0-9_]{3,16}$", name))
