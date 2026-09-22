@@ -69,15 +69,23 @@ def default_minecraft_dir() -> Path:
     """默认的 .minecraft 路径
 
     查找顺序：
-      1. 环境变量 MCLUNCHER_MINECRAFT_DIR（整合包装在 D 盘之类的地方就设这个）
-      2. 各平台默认位置
-
-    设置页做好之后，可以在这里加一条"读 config.json"，
-    这样就不必让用户改环境变量了。
+      1. 环境变量 MCLUNCHER_MINECRAFT_DIR（临时测试用）
+      2. config.json 里的 minecraft_dir（用户在设置页填的）
+      3. 各平台默认位置
     """
     env = os.environ.get("MCLUNCHER_MINECRAFT_DIR")
     if env:
         return Path(env).expanduser()
+
+    # 尝试读 config
+    try:
+        from core.config import config
+        custom = config.get("minecraft_dir", "").strip()
+        if custom:
+            return Path(custom).expanduser()
+    except Exception:
+        pass   # 配置模块出错时回退到默认，不影响扫描
+
     if os.name == "nt":
         return Path(os.environ.get("APPDATA", Path.home())) / ".minecraft"
     if sys.platform == "darwin":
