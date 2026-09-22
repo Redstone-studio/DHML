@@ -33,5 +33,8 @@ def resource_path(*parts: str) -> Path:
 
 
 def stylesheet_path() -> Path:
-    """dark.qss 的位置"""
-    return resource_path("assets", "styles", "dark.qss")
+    """主题模板的位置
+
+    这个文件里颜色全是 @变量@，由 core/theme.py 在加载时替换。
+    """
+    return resource_path("assets", "styles", "app.qss")

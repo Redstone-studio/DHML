@@ -5,17 +5,18 @@
 
 另外这里刻意**没有**连接 QListWidget.currentItemChanged —— 旧代码那样做会导致
 每次 refresh() 里的 setCurrentItem 都触发 set_current + 写盘，并在刷新时重复
-发信号。现在改成显式的「设为当前」按钮。
+发信号。现在改成：单击只选中，**双击**（或点「设为当前」按钮）才真的切换。
 
 列表行的做法和版本页一致：QListWidget + 自定义行控件。
-两个 Qt 细节：
+三个 Qt 细节：
 - 行控件是普通 QWidget 子类，默认不画 QSS 背景 —— 正好让选中底色透出来
 - 行控件必须设 WA_TransparentForMouseEvents，否则点击被它吃掉，选不中
+- "当前档案"用左侧竖条表示，不用右侧徽章：徽章飘在行尾离内容很远，很破坏观感
 """
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox,
+    QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox,
     QPushButton, QVBoxLayout, QWidget
 )
 
@@ -28,16 +29,23 @@ ROW_HEIGHT = 62
 
 
 class _AccountRow(QWidget):
-    """一行账户：图标 + 名字/uuid + 右侧标签"""
+    """一行账户：图标 + 名字 / uuid · 类型；当前档案左侧带强调色竖条"""
 
     def __init__(self, account: dict, is_current: bool):
         super().__init__()
-        # 让点击穿透到 QListWidget，否则选中功能整个失效
+        # 让点击穿透到 QListWidget，否则选中/双击全都失效
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 6, 12, 6)
-        layout.setSpacing(12)
+        layout.setContentsMargins(6, 6, 14, 6)
+        layout.setSpacing(10)
+
+        # 左侧竖条。不管是不是当前档案都占位，只是颜色不同，
+        # 这样两种行的文字起始位置能对齐。
+        accent = QFrame()
+        accent.setObjectName("AccountRowAccent" if is_current else "AccountRowAccentOff")
+        accent.setFixedWidth(4)
+        layout.addWidget(accent)
 
         avatar = QLabel()
         avatar.setFixedSize(30, 30)
@@ -52,24 +60,16 @@ class _AccountRow(QWidget):
         text_box.setSpacing(2)
 
         name = QLabel(str(account.get("name", "?")))
-        name.setObjectName("AccountRowName")
+        name.setObjectName("AccountRowNameCurrent" if is_current else "AccountRowName")
         text_box.addWidget(name)
 
         uuid_text = str(account.get("uuid", ""))
-        meta = QLabel(f"{uuid_text[:8]}…" if uuid_text else "—")
+        short_uuid = f"{uuid_text[:8]}…" if uuid_text else "—"
+        meta = QLabel(f"{short_uuid}    ·    {type_label(account.get('type'))}")
         meta.setObjectName("AccountRowMeta")
         text_box.addWidget(meta)
 
         layout.addLayout(text_box, 1)
-
-        type_tag = QLabel(type_label(account.get("type")))
-        type_tag.setObjectName("Badge")
-        layout.addWidget(type_tag)
-
-        if is_current:
-            current_tag = QLabel(tr("当前使用"))
-            current_tag.setObjectName("BadgeAccent")
-            layout.addWidget(current_tag)
 
 
 class AccountsPage(TranslatableWidget):
@@ -96,6 +96,7 @@ class AccountsPage(TranslatableWidget):
         self.list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self.list, 1)
 
         self.empty_label = self.label(
@@ -104,7 +105,8 @@ class AccountsPage(TranslatableWidget):
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.empty_label)
 
-        layout.addSpacing(12)
+        layout.addWidget(self.label("双击一行可以直接切换为当前档案", "HintText"))
+        layout.addSpacing(8)
 
         buttons = QHBoxLayout()
         buttons.setSpacing(10)
@@ -168,6 +170,11 @@ class AccountsPage(TranslatableWidget):
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
     # ---------- 操作 ----------
+
+    def _on_item_double_clicked(self, item):
+        """双击 = 切换为当前档案"""
+        self.list.setCurrentItem(item)
+        self._set_current()
 
     def _set_current(self):
         name = self._selected_name()

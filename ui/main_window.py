@@ -1,8 +1,10 @@
 """主窗口：侧边栏 + 页面堆栈"""
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 
-from core import i18n
+from core import i18n, theme
 from core.accounts import AccountManager
 from core.app_info import APP_NAME
 from core.config import config
@@ -10,6 +12,7 @@ from core.resources import resource_path, stylesheet_path
 from ui.dialogs.new_account_dialog import NewAccountDialog
 from ui.pages.accounts_page import AccountsPage
 from ui.pages.home_page import HomePage
+from ui.pages.personalize_page import PersonalizePage
 from ui.pages.settings_page import SettingsPage
 from ui.pages.versions_page import VersionsPage
 from ui.widgets.sidebar import Sidebar
@@ -42,6 +45,7 @@ class MainWindow(QMainWindow):
             "home": HomePage(self.account_manager),
             "versions": VersionsPage(),
             "accounts": AccountsPage(self.account_manager),
+            "personalize": PersonalizePage(),
             "settings": SettingsPage(),
         }
         for page in self.pages.values():
@@ -56,7 +60,19 @@ class MainWindow(QMainWindow):
         accounts_page.add_requested.connect(self.open_new_account_dialog)
 
         self.pages["settings"].config_changed.connect(self._on_config_changed)
-        self.pages["settings"].language_changed.connect(self.set_language)
+
+        # 主题和语言改到"个性化"页了
+        personalize = self.pages["personalize"]
+        personalize.language_changed.connect(self.set_language)
+        personalize.theme_changed.connect(self.load_styles)
+
+        # 系统深浅色变了就重刷（只有"跟随系统"模式才真的会动样式）
+        try:
+            QGuiApplication.styleHints().colorSchemeChanged.connect(
+                self._on_system_color_scheme_changed
+            )
+        except AttributeError:
+            pass    # 老版本 Qt 没这个 API，那就只能跟随不了系统
 
         # ---------- 初始状态 ----------
         self.sidebar.set_account(self.account_manager.get_current())
@@ -100,14 +116,28 @@ class MainWindow(QMainWindow):
         for page in self.pages.values():
             page.retranslate()
 
-    # ---------- 样式 ----------
+    # ---------- 样式 / 主题 ----------
+
+    def _system_is_dark(self) -> bool:
+        """系统用的是深色还是浅色（Qt 6.5+ 才有 colorScheme）"""
+        try:
+            return QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
+        except AttributeError:
+            return True     # 拿不到就默认深色
+
+    def current_theme_mode(self) -> str:
+        """把配置里的 system/dark/light 落到实际的 dark/light"""
+        return theme.effective_mode(config.get("theme", "system"), self._system_is_dark())
 
     def load_styles(self):
-        """加载 QSS
+        """加载样式表
 
-        路径交给 core/resources.py 统一解析（打包后是 <exe>/_internal/assets/...）。
-        绝对不要写 open("assets/styles/dark.qss") —— 那是 0.0.x 系列里
-        样式一直不生效的根因，而且异常被静默吞掉之后极难排查。
+        两步替换：
+          1. @ICONS@ → 图标目录的绝对路径（Qt 的 url() 相对路径是按工作目录解析的，
+                       打包后工作目录一变就找不到图）
+          2. @变量@  → core/theme.py 里对应主题的实际颜色
+        最后检查有没有漏网的变量 —— 写错名字的话 Qt 会静默忽略那条规则，
+        界面会悄悄少个样式，很难查。
         """
         path = stylesheet_path()
         try:
@@ -117,11 +147,21 @@ class MainWindow(QMainWindow):
             print(f"[UI] 样式加载失败: {path} ({e})")
             return
 
-        # QSS 里的 @ICONS@ 要换成图标目录的绝对路径。
-        # Qt 的 url() 相对路径是按「当前工作目录」解析的，不是按 qss 文件位置，
-        # 打包成 exe 之后工作目录一变图标就全丢了。
         qss = qss.replace("@ICONS@", resource_path("assets", "icons").as_posix())
+
+        mode = self.current_theme_mode()
+        qss = theme.resolve(qss, theme.palette(mode, config.get("accent_color", "")))
+
+        left = theme.unresolved(qss)
+        if left:
+            print(f"[UI] app.qss 里有没被替换的变量（写错名字了？）: {left}")
+
         self.setStyleSheet(qss)
+
+    def _on_system_color_scheme_changed(self, *_args):
+        """系统深浅色变了。只有"跟随系统"时才有必要重刷"""
+        if config.get("theme", "system") == "system":
+            self.load_styles()
 
     # ---------- 账户 ----------
 

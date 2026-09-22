@@ -87,6 +87,7 @@ class Sidebar(TranslatableWidget):
         ("home", "\u25b6", "启动"),
         ("versions", "\u25a4", "版本"),
         ("accounts", "\u25c9", "账户"),
+        ("personalize", "\u25d0", "个性化"),
         ("settings", "\u2699", "设置"),
     )  # noqa: i18n  —— 这些中文在 _apply_nav_texts 里过 tr()
 
