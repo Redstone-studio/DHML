@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号（如 v0.0.1-alpha）'
+        description: '版本号（如 v0.1.0-alpha）'
         required: true
-        default: 'v0.0.1-alpha'
+        default: 'v0.0.5-alpha'
       prerelease:
         description: '是否为预发布版'
         type: boolean
