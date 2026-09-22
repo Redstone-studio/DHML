@@ -1,0 +1,33 @@
+name: Experimental - Onefile Build
+
+on:
+  workflow_dispatch:   # 只手动触发
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt6 pyinstaller
+
+      # 单文件打包
+      - name: Build (onefile)
+        run: pyinstaller --noconfirm --windowed --onefile --name MCLuncher --add-data "assets;assets" main.py
+
+      - name: Show dist content
+        run: dir dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MCLuncher-onefile-${{ github.run_number }}
+          path: dist/MCLuncher.exe
+          retention-days: 7
