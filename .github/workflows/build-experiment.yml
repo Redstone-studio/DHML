@@ -1,10 +1,10 @@
-name: Build Experiment v3.0 (Onefile, Password Protected)
+name: Build Experiment v3.0 (Onefile)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # 手动触发
     inputs:
       version:
-        description: 'Release 版本号'
+        description: 'Release 版本号（如 v3.0.0-exp）'
         required: true
         default: 'v3.0.0-exp'
 
@@ -28,56 +28,55 @@ jobs:
           python -m pip install --upgrade pip
           pip install PyQt6 requests pyinstaller
 
+      # 把实验文件拷到根目录（方便打包，也避免路径问题）
       - name: Copy source
         shell: pwsh
-        run: Copy-Item "experiments/MC_LuncherTEST-3.0.py" -Destination "MC_LuncherTEST-3.0.py"
+        run: |
+          Copy-Item "experiments/MC_LuncherTEST-3.0.py" -Destination "MC_LuncherTEST-3.0.py"
 
+      # 单文件打包
+      # 注意：Windows 上默认 shell 是 pwsh，多行续行要小心，所以用单行
       - name: Build (onefile)
         shell: pwsh
         run: pyinstaller --noconfirm --windowed --onefile --name "RedstoneLauncher-Experiment-v3.0" "MC_LuncherTEST-3.0.py"
 
-      # 用 7-Zip 加密打包
-      - name: Zip with password
-        shell: pwsh
-        run: |
-          # 安装 7-Zip（如果没装）
-          if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) {
-            choco install 7zip -y
-          }
-          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
-          if (-not (Test-Path $sevenZip)) {
-            $sevenZip = "C:\Program Files (x86)\7-Zip\7z.exe"
-          }
-          # 加密压缩
-          & $sevenZip a -tzip -p"${{ secrets.ZIP_PASSWORD }}" -mem=AES256 "RedstoneLauncher-Experiment-v3.0-encrypted.zip" "dist\RedstoneLauncher-Experiment-v3.0.exe"
-        env:
-          ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
-
-      - name: Show files
+      - name: Show dist
         shell: pwsh
         run: |
           dir dist
-          dir *.zip
+          dir dist\*.exe
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.version }}
-          name: "RedstoneLauncher Experiment ${{ inputs.version }} (Encrypted)"
+          name: "RedstoneLauncher Experiment ${{ inputs.version }}"
           body: |
             ## 🧪 实验版 RedstoneLauncher ${{ inputs.version }}
 
-            **⚠️ 此版本为加密发布，仅供作者本人使用。**
+            这是**实验程序 v3.0** 的打包版本（单文件）。
 
-            ### 说明
-            - 这是**实验程序 v3.0** 的打包版本（单文件）
-            - 压缩包**已加密**，只有作者知道密码
-            - 普通用户请从源码自行打包（见 README）
+            ### ⚠️ 注意
+            这是**实验版本**，不是正式项目。用于测试功能。
+            正式项目请期待 `Redstone Launcher` 的 Release。
 
-            ### 对于作者
-            解压密码在 GitHub Secret `ZIP_PASSWORD` 里。
+            ### 功能
+            - ✅ 版本下拉框（BMCLAPI 官方 + 本地版本）
+            - ✅ 下载原版
+            - ✅ 下载 + 安装 Forge
+            - ✅ 下载 + 安装 Fabric（loader + API）
+            - ✅ 启动原版 / Forge / Fabric
+            - ✅ `inheritsFrom` 合并
+            - ✅ 日志过滤
 
-            ### 对于其他人
-            如果你需要这个程序：
-            1. 从 [源码](https://github.com/kongxia114/Redstone-Launcher/blob/main/experiments/MC_LuncherTEST-3.0.py) 自行打包
-            2. 或等待正式版 `Redstone Launcher`
+            ### 首次运行提示
+            未签名软件可能被 Windows SmartScreen 拦截。
+            点"更多信息" → "仍要运行"即可。
+            这不是病毒，[源代码](https://github.com/kongxia114/Redstone-Launcher/blob/main/experiments/MC_LuncherTEST-3.0.py)公开。
+
+            ### 下载
+            见下方 Assets。
+          files: |
+            dist/RedstoneLauncher-Experiment-v3.0.exe
+          prerelease: true
+          draft: false
