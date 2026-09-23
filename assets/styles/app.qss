@@ -261,6 +261,20 @@ QPushButton:disabled {
     color: @text_disabled@;
 }
 
+/* 启动按钮是"两行"的：主文案一行，版本号一行（自己拼的 QFrame，见 home_page.py）。
+   两个 QLabel 得自己声明颜色 —— QFrame 上的 color 不会遗传给它们。 */
+#LaunchTitle {
+    background-color: transparent;
+    color: @on_accent@;
+    font-size: 17px;
+    font-weight: bold;
+}
+#LaunchSubtitle {
+    background-color: transparent;
+    color: @on_accent@;
+    font-size: 11px;
+}
+
 /* ============================ 输入控件 ============================ */
 
 QLineEdit {
@@ -623,6 +637,12 @@ QScrollBar::add-page, QScrollBar::sub-page {
     font-size: 12px;
 }
 
+/* 有版本类型图（草方块/圆石/铁砧…）时的方块：透明底，让图自己说话 */
+#BadgeIcon {
+    background-color: transparent;
+    border: none;
+}
+
 #BadgeVanilla {
     background-color: @accent_bg@;
     border: 1px solid @accent_border@;
@@ -742,6 +762,84 @@ QScrollArea > QWidget > QWidget {
     background-color: @bg_elevated@;
     border-color: @accent@;
     color: @accent@;
+}
+
+/* ==================== 独立日志窗口 ==================== */
+
+#LogWindow {
+    background-color: @bg_page@;
+}
+/* 级别计数：既是计数也是过滤开关 —— 点一下把那一级藏起来，再点一下放出来。
+   所以它们是 checkable 的 QPushButton，这里把按钮外观压成"文字标签"的样子。 */
+#LogCountFatal, #LogCountError, #LogCountWarn, #LogCountInfo, #LogCountDebug {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 2px 8px;
+}
+#LogCountFatal:hover, #LogCountError:hover, #LogCountWarn:hover,
+#LogCountInfo:hover, #LogCountDebug:hover {
+    background-color: @bg_elevated@;
+    border-color: @border_control@;
+}
+#LogCountFatal {
+    color: @danger@;
+    font-weight: bold;
+}
+#LogCountError {
+    color: @danger@;
+}
+#LogCountWarn {
+    color: @warn@;
+}
+#LogCountInfo {
+    color: @text_faint@;
+}
+#LogCountDebug {
+    color: @text_disabled@;
+}
+/* 点掉的级别（按钮弹起）：压暗表示"这一级现在不显示" */
+#LogCountFatal:!checked, #LogCountError:!checked, #LogCountWarn:!checked,
+#LogCountInfo:!checked, #LogCountDebug:!checked {
+    color: @text_disabled@;
+    font-weight: normal;
+}
+
+/* ==================== 游戏日志 ==================== */
+
+/* 日志窗口的日志正文。每一行的级别颜色由 QTextCharFormat 决定，不在这里 ——
+   QSS 只能给整个控件一个颜色，管不到单独几行。 */
+#GameLog {
+    background-color: @bg_window@;
+    border: 1px solid @border@;
+    border-radius: 8px;
+    color: @text_dim@;
+    font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+    font-size: 12px;
+    padding: 6px;
+}
+
+/* 首页那条"最近发生了什么"。日志本体已经搬去独立窗口了 */
+#StatusText {
+    color: @text_secondary@;
+    font-size: 13px;
+}
+
+/* 运行中的「停止游戏」按钮。平时是绿色 LaunchButton，跑起来换成红色 */
+#StopButton {
+    background-color: @danger@;
+    border: 1px solid @danger_hover@;
+    border-radius: 10px;
+    color: @on_accent@;
+    font-size: 16px;
+    font-weight: bold;
+}
+#StopButton:hover {
+    background-color: @danger_hover@;
+}
+#StopButton:disabled {
+    background-color: @danger_bg@;
+    color: @text_disabled@;
 }
 
 /* ============================ 对话框 ============================ */
