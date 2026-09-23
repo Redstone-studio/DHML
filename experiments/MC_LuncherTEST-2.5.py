@@ -1,0 +1,1293 @@
+"""
+MC 启动器测试窗口 v2.5
+- 版本下拉框（BMCLAPI 版本清单，保留选中）
+- 原版 + Forge（inheritsFrom 合并）
+- 原版下载
+- Forge 下载 + 静默安装
+- 实时显示日志
+"""
+
+import sys
+import json
+import platform
+import subprocess
+import threading
+import hashlib
+import zipfile
+import shlex
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from datetime import datetime
+
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QTextEdit, QLabel, QLineEdit, QFormLayout, QGroupBox,
+    QMessageBox, QComboBox, QDialog, QDialogButtonBox, QScrollArea
+)
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
+from PyQt6.QtGui import QFont
+
+
+# ============================================================
+# 默认配置
+# ============================================================
+DEFAULT_MC_DIR = r"D:\DHML\.minecraft"
+DEFAULT_JAVA = r"C:\Users\yexia\AppData\Roaming\.minecraft\runtime\java-runtime-delta\bin\java.exe"
+DEFAULT_USERNAME = "BaBaLe"
+DEFAULT_MEMORY = 8192
+# ============================================================
+
+
+# ============================================================
+# 通用工具
+# ============================================================
+def rules_allow(rules):
+    if not rules:
+        return True
+    sys_name = platform.system()
+    current_os = {"Windows": "windows", "Darwin": "osx", "Linux": "linux"}.get(sys_name, "")
+    current_arch = "x86_64" if platform.machine() in ("AMD64", "x86_64") else platform.machine().lower()
+    for rule in rules:
+        action = rule.get("action")
+        os_rule = rule.get("os", {})
+        os_name = os_rule.get("name")
+        os_arch = os_rule.get("arch")
+        if os_name and os_name != current_os:
+            continue
+        if os_arch:
+            if os_arch == "x86" and current_arch != "x86":
+                continue
+            if os_arch == "x86_64" and current_arch != "x86_64":
+                continue
+        if "features" in rule:
+            continue
+        if action == "allow":
+            return True
+        if action == "disallow":
+            return False
+    return False
+
+
+def get_natives_key(lib):
+    natives = lib.get("natives", {})
+    if not natives:
+        return None
+    sys_name = platform.system()
+    os_key = {"Windows": "windows", "Darwin": "osx", "Linux": "linux"}.get(sys_name, "")
+    key = natives.get(os_key)
+    if not key:
+        return None
+    if "${arch}" in key:
+        arch = "64" if platform.machine() in ("AMD64", "x86_64") else "32"
+        key = key.replace("${arch}", arch)
+    return key
+
+
+# ============================================================
+# 版本清单拉取
+# ============================================================
+class ManifestFetcher(QObject):
+    log = pyqtSignal(str)
+    finished = pyqtSignal(list)
+
+    def run(self):
+        try:
+            self.log.emit("正在获取版本清单...")
+            url = "https://bmclapi2.bangbang93.com/mc/game/version_manifest_v2.json"
+            r = requests.get(url, timeout=30, headers={"User-Agent": "DHML/1.0"})
+            r.raise_for_status()
+            data = r.json()
+            versions = data.get("versions", [])
+            self.log.emit(f"✓ 获取到 {len(versions)} 个版本")
+            self.finished.emit(versions)
+        except Exception as e:
+            self.log.emit(f"❌ 获取版本清单失败: {e}")
+            self.finished.emit([])
+
+
+# ============================================================
+# 下载器
+# ============================================================
+class Downloader:
+    def __init__(self, log_callback=None):
+        self.log = log_callback or print
+        self.session = requests.Session()
+        self.session.headers.update({"User-Agent": "DHML/1.0"})
+
+    @staticmethod
+    def replace_mirror(url: str) -> str:
+        if not url:
+            return url
+        return (url
+            .replace("piston-data.mojang.com", "bmclapi2.bangbang93.com")
+            .replace("piston-meta.mojang.com", "bmclapi2.bangbang93.com")
+            .replace("libraries.minecraft.net", "bmclapi2.bangbang93.com/maven")
+            .replace("resources.download.minecraft.net", "bmclapi2.bangbang93.com/assets")
+            .replace("launcher.mojang.com", "bmclapi2.bangbang93.com")
+            .replace("launchermeta.mojang.com", "bmclapi2.bangbang93.com")
+            .replace("maven.minecraftforge.net", "bmclapi2.bangbang93.com/maven")
+            .replace("maven.neoforged.net", "bmclapi2.bangbang93.com/maven")
+        )
+
+    @staticmethod
+    def sha1_file(path) -> str:
+        h = hashlib.sha1()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    def download_file(self, url, save_path, sha1=None, retries=2):
+        save_path = Path(save_path)
+
+        if save_path.exists() and sha1:
+            try:
+                if self.sha1_file(save_path) == sha1:
+                    return True
+            except:
+                pass
+
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        mirror_url = self.replace_mirror(url)
+        urls_to_try = [mirror_url]
+        if mirror_url != url:
+            urls_to_try.append(url)
+
+        last_error = None
+        for target_url in urls_to_try:
+            for attempt in range(retries):
+                try:
+                    r = self.session.get(target_url, stream=True, timeout=30)
+                    r.raise_for_status()
+                    tmp = save_path.with_suffix(save_path.suffix + ".tmp")
+                    with open(tmp, "wb") as f:
+                        for chunk in r.iter_content(8192):
+                            f.write(chunk)
+                    if sha1:
+                        actual = self.sha1_file(tmp)
+                        if actual != sha1:
+                            tmp.unlink()
+                            self.log(f"❌ SHA1 不匹配: {save_path.name}")
+                            continue
+                    if save_path.exists():
+                        save_path.unlink()
+                    tmp.rename(save_path)
+                    return True
+                except requests.HTTPError as e:
+                    last_error = e
+                    if e.response.status_code == 404:
+                        break
+                except Exception as e:
+                    last_error = e
+                    if attempt == retries - 1:
+                        break
+
+        self.log(f"❌ 下载失败 {save_path.name}: {last_error}")
+        return False
+
+    def download_batch(self, tasks, max_workers=16, progress_cb=None):
+        total = len(tasks)
+        done = 0
+        failed = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self.download_file, t["url"], t["path"], t.get("sha1")): t
+                for t in tasks
+            }
+            for future in as_completed(futures):
+                ok = future.result()
+                done += 1
+                if not ok:
+                    failed += 1
+                if progress_cb and (done % 20 == 0 or done == total):
+                    progress_cb(done, total, failed)
+        return done, failed
+
+    def install_version(self, version_id, mc_dir, version_json_url, version_json_sha1=None, progress_cb=None):
+        mc_dir = Path(mc_dir)
+
+        self.log(f"[1/5] 下载版本 JSON...")
+        version_dir = mc_dir / "versions" / version_id
+        version_dir.mkdir(parents=True, exist_ok=True)
+        json_path = version_dir / f"{version_id}.json"
+
+        if not self.download_file(version_json_url, json_path, version_json_sha1):
+            raise RuntimeError("版本 JSON 下载失败")
+
+        with open(json_path, "r", encoding="utf-8") as f:
+            vj = json.load(f)
+
+        self.log(f"[2/5] 收集下载任务...")
+        tasks = []
+
+        client = vj["downloads"]["client"]
+        tasks.append({"url": client["url"], "path": version_dir / f"{version_id}.jar", "sha1": client["sha1"]})
+
+        for lib in vj["libraries"]:
+            if not rules_allow(lib.get("rules", [])):
+                continue
+            downloads = lib.get("downloads", {})
+            artifact = downloads.get("artifact")
+            if artifact:
+                tasks.append({
+                    "url": artifact["url"],
+                    "path": mc_dir / "libraries" / artifact["path"],
+                    "sha1": artifact["sha1"],
+                })
+            classifiers = downloads.get("classifiers", {})
+            nk = get_natives_key(lib)
+            if nk and nk in classifiers:
+                nat = classifiers[nk]
+                tasks.append({
+                    "url": nat["url"],
+                    "path": mc_dir / "libraries" / nat["path"],
+                    "sha1": nat["sha1"],
+                })
+
+        ai = vj["assetIndex"]
+        asset_index_path = mc_dir / "assets" / "indexes" / f"{ai['id']}.json"
+        tasks.append({"url": ai["url"], "path": asset_index_path, "sha1": ai["sha1"]})
+
+        if "logging" in vj:
+            lf = vj["logging"]["client"]["file"]
+            tasks.append({
+                "url": lf["url"],
+                "path": mc_dir / "assets" / "log_configs" / lf["id"],
+                "sha1": lf["sha1"],
+            })
+
+        self.log(f"    共 {len(tasks)} 个文件")
+
+        self.log(f"[3/5] 下载 libraries + client...")
+        done, failed = self.download_batch(tasks, max_workers=16, progress_cb=progress_cb)
+        self.log(f"    完成 {done}/{len(tasks)}, 失败 {failed}")
+        if failed > len(tasks) * 0.1:
+            raise RuntimeError(f"{failed}/{len(tasks)} 个文件失败，超过 10% 阈值")
+        elif failed > 0:
+            self.log(f"⚠ 有 {failed} 个文件失败，继续安装")
+
+        self.log(f"[4/5] 下载资源文件（最慢）...")
+        if asset_index_path.exists():
+            with open(asset_index_path, "r", encoding="utf-8") as f:
+                index_data = json.load(f)
+            asset_tasks = []
+            for name, obj in index_data["objects"].items():
+                h = obj["hash"]
+                sub = h[:2]
+                asset_tasks.append({
+                    "url": f"https://resources.download.minecraft.net/{sub}/{h}",
+                    "path": mc_dir / "assets" / "objects" / sub / h,
+                    "sha1": h,
+                })
+            self.log(f"    共 {len(asset_tasks)} 个资源文件")
+            done, failed = self.download_batch(asset_tasks, max_workers=32, progress_cb=progress_cb)
+            self.log(f"    完成 {done}/{len(asset_tasks)}, 失败 {failed}")
+
+        self.log(f"[5/5] 解压 natives...")
+        self._extract_natives(vj, mc_dir, version_dir)
+
+        self.log(f"✅ {version_id} 安装完成！")
+        return version_dir
+
+    def _extract_natives(self, vj, mc_dir, version_dir):
+        natives_dir = version_dir / f"{version_dir.name}-natives"
+        natives_dir.mkdir(parents=True, exist_ok=True)
+        if any(natives_dir.glob("*.dll")):
+            return
+        for lib in vj["libraries"]:
+            downloads = lib.get("downloads", {})
+            classifiers = downloads.get("classifiers", {})
+            nk = get_natives_key(lib)
+            if nk and nk in classifiers:
+                jar_path = mc_dir / "libraries" / classifiers[nk]["path"]
+                if jar_path.exists():
+                    try:
+                        with zipfile.ZipFile(jar_path, "r") as z:
+                            for name in z.namelist():
+                                if name.startswith("META-INF/"):
+                                    continue
+                                z.extract(name, natives_dir)
+                    except Exception as e:
+                        self.log(f"⚠ 解压 {jar_path.name} 失败: {e}")
+
+
+# ============================================================
+# Forge 下载器
+# ============================================================
+class ForgeDownloader:
+    """Forge 下载 + 静默安装"""
+    
+    BMCLAPI = "https://bmclapi2.bangbang93.com"
+    
+    def __init__(self, log_callback=None):
+        self.log = log_callback or print
+        self.session = requests.Session()
+        self.session.headers.update({"User-Agent": "DHML/1.0"})
+    
+    def get_forge_versions(self, mc_version):
+        """获取某 MC 版本可用的 Forge 列表"""
+        url = f"{self.BMCLAPI}/forge/minecraft/{mc_version}"
+        r = self.session.get(url, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        
+        # BMCLAPI 返回的每一项有 version / build / files
+        # files 里有 category=installer 的
+        result = []
+        for item in data:
+            forge_ver = item.get("version", "")
+            build = item.get("build", 0)
+            modified = item.get("modified", "")
+            
+            # 找 installer 文件
+            installer = None
+            for f in item.get("files", []):
+                if f.get("category") == "installer" and f.get("format") == "jar":
+                    installer = f
+                    break
+            
+            result.append({
+                "mcversion": mc_version,
+                "version": forge_ver,
+                "build": build,
+                "modified": modified,
+                "installer_hash": installer.get("hash") if installer else None,
+            })
+        
+        # 按 build 倒序
+        result.sort(key=lambda x: x["build"], reverse=True)
+        return result
+    
+    def download_installer(self, mc_version, forge_version, save_path, progress_cb=None):
+        """下载 Forge installer.jar"""
+        url = f"{self.BMCLAPI}/forge/download"
+        params = {
+            "mcversion": mc_version,
+            "version": forge_version,
+            "category": "installer",
+            "format": "jar",
+        }
+        # requests 自动处理 302
+        r = self.session.get(url, params=params, stream=True, timeout=60)
+        r.raise_for_status()
+        
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        total = int(r.headers.get("content-length", 0))
+        done = 0
+        with open(save_path, "wb") as f:
+            for chunk in r.iter_content(8192):
+                f.write(chunk)
+                done += len(chunk)
+                if progress_cb and total:
+                    progress_cb(done, total)
+        
+        return save_path
+    
+    def install_forge(self, installer_jar, mc_dir, java_path):
+        """静默运行 Forge 安装器
+        
+        Forge installer 支持：
+          --installClient <path>   安装客户端到指定目录
+        """
+        cmd = [
+            java_path,
+            "-jar", str(installer_jar),
+            "--installClient", str(mc_dir),
+        ]
+        
+        self.log(f"运行安装器: {' '.join(cmd)}")
+        
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(installer_jar.parent),
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        
+        for line in process.stdout:
+            line = line.rstrip()
+            if line:
+                self.log(f"[Forge] {line}")
+        
+        rc = process.wait()
+        if rc != 0:
+            raise RuntimeError(f"Forge 安装器返回码: {rc}")
+        
+        return rc
+
+
+# ============================================================
+# 启动线程（支持 inheritsFrom 合并）
+# ============================================================
+class Worker(QObject):
+    log = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.process = None
+        self._stopped = False
+
+    def launch(self):
+        try:
+            cmd = self._build_command()
+            self.log.emit("=" * 60)
+            self.log.emit("完整命令:")
+            self.log.emit("-" * 60)
+            for a in cmd:
+                self.log.emit(f"  {a}" if len(a) < 120 else f"  {a[:117]}...")
+            self.log.emit("-" * 60)
+            self.log.emit(f"[{self._ts()}] 启动进程...")
+            self.process = subprocess.Popen(
+                cmd,
+                cwd=str(self.config["version_dir"]),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+            self.log.emit(f"[{self._ts()}] ✓ 进程已启动, PID={self.process.pid}")
+            for line in self.process.stdout:
+                if self._stopped:
+                    break
+                self.log.emit(line.rstrip())
+            rc = self.process.wait()
+            self.log.emit(f"[{self._ts()}] 进程退出, 返回码={rc}")
+        except FileNotFoundError as e:
+            self.log.emit(f"❌ 找不到文件: {e}")
+        except Exception as e:
+            self.log.emit(f"❌ 启动失败: {type(e).__name__}: {e}")
+            import traceback
+            self.log.emit(traceback.format_exc())
+        finally:
+            self.finished.emit()
+
+    def stop(self):
+        self._stopped = True
+        if self.process and self.process.poll() is None:
+            self.process.terminate()
+            self.log.emit(f"[{self._ts()}] 已发送终止信号")
+
+    def _load_version_with_inherits(self, mc_dir, version_id):
+        cache = {}
+
+        def _load(vid, depth=0):
+            if vid in cache:
+                return cache[vid]
+            if depth > 5:
+                raise RuntimeError(f"版本继承链过深: {vid}")
+
+            version_dir = mc_dir / "versions" / vid
+            json_path = version_dir / f"{vid}.json"
+            if not json_path.exists():
+                raise FileNotFoundError(f"版本 JSON 不存在: {json_path}")
+
+            with open(json_path, "r", encoding="utf-8") as f:
+                vj = json.load(f)
+
+            parent_id = vj.get("inheritsFrom")
+            if parent_id:
+                self.log.emit(f"  加载: {vid}  (继承自 {parent_id})")
+                parent = _load(parent_id, depth + 1)
+                merged = self._merge_version(parent, vj)
+            else:
+                self.log.emit(f"  加载: {vid}")
+                merged = vj
+
+            cache[vid] = merged
+            return merged
+
+        return _load(version_id)
+
+    def _merge_version(self, parent, child):
+        libs_by_name = {}
+        for lib in parent.get("libraries", []):
+            libs_by_name[lib.get("name", "")] = lib
+        for lib in child.get("libraries", []):
+            libs_by_name[lib.get("name", "")] = lib
+
+        main_class = child.get("mainClass") or parent.get("mainClass")
+
+        child_args = child.get("arguments")
+        parent_args = parent.get("arguments")
+        if child_args and child_args.get("jvm") and child_args.get("game"):
+            arguments = child_args
+        elif parent_args and child_args:
+            arguments = {
+                "jvm": parent_args.get("jvm", []) + child_args.get("jvm", []),
+                "game": parent_args.get("game", []) + child_args.get("game", []),
+            }
+        elif parent_args:
+            arguments = parent_args
+        elif child_args:
+            arguments = child_args
+        else:
+            arguments = {"jvm": [], "game": []}
+
+        mc_args = child.get("minecraftArguments") or parent.get("minecraftArguments")
+        asset_index = child.get("assetIndex") or parent.get("assetIndex")
+
+        downloads = dict(parent.get("downloads", {}))
+        downloads.update(child.get("downloads", {}))
+
+        java_version = child.get("javaVersion") or parent.get("javaVersion", {})
+        logging_cfg = child.get("logging") or parent.get("logging")
+
+        return {
+            "id": child.get("id", ""),
+            "mainClass": main_class,
+            "javaVersion": java_version,
+            "arguments": arguments,
+            "minecraftArguments": mc_args,
+            "libraries": list(libs_by_name.values()),
+            "assetIndex": asset_index,
+            "downloads": downloads,
+            "logging": logging_cfg,
+            "type": child.get("type") or parent.get("type", "release"),
+            "assets": child.get("assets") or parent.get("assets"),
+        }
+
+    def _get_root_parent(self, mc_dir, version_id):
+        current = version_id
+        for _ in range(10):
+            json_path = mc_dir / "versions" / current / f"{current}.json"
+            if not json_path.exists():
+                break
+            with open(json_path, "r", encoding="utf-8") as f:
+                vj = json.load(f)
+            parent = vj.get("inheritsFrom")
+            if not parent:
+                return current
+            current = parent
+        return version_id
+
+    def _build_command(self):
+        mc_dir = Path(self.config["mc_dir"])
+        version = self.config["version"]
+        username = self.config["username"]
+        memory = self.config["memory"]
+        java = self.config["java"]
+        version_dir = self.config["version_dir"]
+
+        self.log.emit(f"[启动] 加载版本 {version}")
+        vj = self._load_version_with_inherits(mc_dir, version)
+        self.log.emit(f"[启动] 合并后 {len(vj['libraries'])} 个 library")
+
+        classpath = []
+        for lib in vj["libraries"]:
+            if not rules_allow(lib.get("rules", [])):
+                continue
+            artifact = lib.get("downloads", {}).get("artifact")
+            if artifact:
+                classpath.append(str(mc_dir / "libraries" / artifact["path"]))
+
+        client_jar = version_dir / f"{version}.jar"
+        if client_jar.exists():
+            classpath.append(str(client_jar))
+        else:
+            parent_id = self._get_root_parent(mc_dir, version)
+            parent_jar = mc_dir / "versions" / parent_id / f"{parent_id}.jar"
+            if parent_jar.exists():
+                classpath.append(str(parent_jar))
+                self.log.emit(f"[启动] 使用父版本 jar: {parent_id}.jar")
+
+        sep = ";" if sys.platform == "win32" else ":"
+        classpath_str = sep.join(classpath)
+        natives_dir = version_dir / f"{version}-natives"
+        library_dir = mc_dir / "libraries"
+
+        replacements = {
+            "${natives_directory}": str(natives_dir),
+            "${classpath}": classpath_str,
+            "${classpath_separator}": sep,
+            "${library_directory}": str(library_dir),
+            "${launcher_name}": "DHML",
+            "${launcher_version}": "1.0.0",
+            "${auth_player_name}": username,
+            "${version_name}": version,
+            "${game_directory}": str(version_dir),
+            "${assets_root}": str(mc_dir / "assets"),
+            "${assets_index_name}": (vj.get("assetIndex") or {}).get("id", ""),
+            "${auth_uuid}": "00000000000000000000000000000001",
+            "${auth_access_token}": "0",
+            "${clientid}": "",
+            "${auth_xuid}": "",
+            "${user_type}": "legacy",
+            "${version_type}": vj.get("type", "release"),
+            "${resolution_width}": "854",
+            "${resolution_height}": "480",
+            "${user_properties}": "{}",
+        }
+
+        jvm_args = [java, f"-Xmx{memory}m"]
+
+        if vj.get("arguments") and vj["arguments"].get("jvm"):
+            for arg in vj["arguments"]["jvm"]:
+                jvm_args.extend(self._resolve_arg(arg, replacements))
+        else:
+            jvm_args.extend([
+                f"-Djava.library.path={natives_dir}",
+                f"-Djna.tmpdir={natives_dir}",
+                f"-Dorg.lwjgl.system.SharedLibraryExtractPath={natives_dir}",
+                f"-Dio.netty.native.workdir={natives_dir}",
+                "-Dminecraft.launcher.brand=DHML",
+                "-Dminecraft.launcher.version=1.0.0",
+                "-cp", classpath_str,
+            ])
+
+        game_args = [vj["mainClass"]]
+
+        if vj.get("arguments") and vj["arguments"].get("game"):
+            for arg in vj["arguments"]["game"]:
+                game_args.extend(self._resolve_arg(arg, replacements))
+        elif vj.get("minecraftArguments"):
+            raw = vj["minecraftArguments"]
+            for k, val in replacements.items():
+                raw = raw.replace(k, val)
+            try:
+                game_args.extend(shlex.split(raw, posix=False))
+            except:
+                game_args.extend(raw.split())
+
+        cmd = jvm_args + game_args
+        cmd.insert(1, "-Dstdout.encoding=utf-8")
+        cmd.insert(2, "-Dstderr.encoding=utf-8")
+        return cmd
+
+    def _resolve_arg(self, arg, replacements):
+        if isinstance(arg, str):
+            for k, v in replacements.items():
+                arg = arg.replace(k, v)
+            return [arg] if arg else []
+        if isinstance(arg, dict):
+            if "rules" in arg and not rules_allow(arg["rules"]):
+                return []
+            value = arg.get("value", [])
+            if isinstance(value, str):
+                value = [value]
+            result = []
+            for v in value:
+                for k, val in replacements.items():
+                    v = v.replace(k, val)
+                result.append(v)
+            return result
+        return []
+
+    @staticmethod
+    def _ts():
+        return datetime.now().strftime("%H:%M:%S")
+
+
+# ============================================================
+# 原版下载线程
+# ============================================================
+class DownloadWorker(QObject):
+    log = pyqtSignal(str)
+    finished = pyqtSignal(bool)
+    progress = pyqtSignal(int, int, int)
+
+    def __init__(self, version_id, mc_dir, version_json_url, version_json_sha1):
+        super().__init__()
+        self.version_id = version_id
+        self.mc_dir = mc_dir
+        self.version_json_url = version_json_url
+        self.version_json_sha1 = version_json_sha1
+
+    def run(self):
+        try:
+            dl = Downloader(log_callback=self.log.emit)
+            dl.install_version(
+                self.version_id, self.mc_dir,
+                self.version_json_url, self.version_json_sha1,
+                progress_cb=lambda d, t, f: self.progress.emit(d, t, f),
+            )
+            self.finished.emit(True)
+        except Exception as e:
+            self.log.emit(f"❌ 下载失败: {type(e).__name__}: {e}")
+            import traceback
+            self.log.emit(traceback.format_exc())
+            self.finished.emit(False)
+
+
+# ============================================================
+# Forge 下载线程
+# ============================================================
+class ForgeInstallWorker(QObject):
+    log = pyqtSignal(str)
+    finished = pyqtSignal(bool)
+    progress = pyqtSignal(int, int)
+
+    def __init__(self, mc_version, forge_version, mc_dir, java_path):
+        super().__init__()
+        self.mc_version = mc_version
+        self.forge_version = forge_version
+        self.mc_dir = mc_dir
+        self.java_path = java_path
+
+    def run(self):
+        try:
+            dl = ForgeDownloader(log_callback=self.log)
+            
+            # 1. 下载 installer
+            installer_name = f"forge-{self.mc_version}-{self.forge_version}-installer.jar"
+            installer_path = Path(self.mc_dir) / "temp" / installer_name
+            
+            self.log.emit(f"[1/2] 下载 Forge installer...")
+            dl.download_installer(
+                self.mc_version, self.forge_version,
+                installer_path,
+                progress_cb=lambda d, t: self.progress.emit(d, t),
+            )
+            self.log.emit(f"    ✓ 下载完成: {installer_name}")
+            
+            # 2. 静默安装
+            self.log.emit(f"[2/2] 运行 Forge 安装器（可能几分钟）...")
+            dl.install_forge(installer_path, Path(self.mc_dir), self.java_path)
+            
+            # 3. 清理
+            try:
+                installer_path.unlink()
+            except:
+                pass
+            
+            self.log.emit(f"✅ Forge {self.forge_version} for {self.mc_version} 安装完成！")
+            self.finished.emit(True)
+        except Exception as e:
+            self.log.emit(f"❌ Forge 安装失败: {type(e).__name__}: {e}")
+            import traceback
+            self.log.emit(traceback.format_exc())
+            self.finished.emit(False)
+
+
+# ============================================================
+# Forge 选择对话框
+# ============================================================
+class ForgeSelectDialog(QDialog):
+    """选择 Forge 版本的对话框"""
+    
+    def __init__(self, mc_version, forge_list, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"选择 Forge 版本 - MC {mc_version}")
+        self.resize(450, 500)
+        self.selected = None
+        self.forge_list = forge_list
+        
+        layout = QVBoxLayout(self)
+        
+        title = QLabel(f"MC {mc_version} 可用的 Forge 版本（{len(forge_list)} 个）")
+        title.setFont(QFont("Microsoft YaHei", 10, QFont.Weight.Bold))
+        layout.addWidget(title)
+        
+        self.combo = QComboBox()
+        for item in forge_list:
+            build = item["build"]
+            ver = item["version"]
+            modified = item.get("modified", "")[:10]
+            label = f"{ver}  (build {build})  {modified}"
+            self.combo.addItem(label, userData=item)
+        layout.addWidget(self.combo)
+        
+        # 信息
+        self.info = QLabel("")
+        self.info.setWordWrap(True)
+        layout.addWidget(self.info)
+        self.combo.currentIndexChanged.connect(self._on_change)
+        self._on_change()
+        
+        layout.addStretch()
+        
+        # 按钮
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(self._on_ok)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+    
+    def _on_change(self):
+        item = self.combo.currentData()
+        if item:
+            self.info.setText(
+                f"MC 版本: {item['mcversion']}\n"
+                f"Forge 版本: {item['version']}\n"
+                f"Build: {item['build']}\n"
+                f"发布时间: {item.get('modified', '')}"
+            )
+    
+    def _on_ok(self):
+        self.selected = self.combo.currentData()
+        self.accept()
+
+
+# ============================================================
+# 主窗口
+# ============================================================
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("DHML 启动测试 v2.5")
+        self.resize(1000, 750)
+
+        self.manifest_versions = []
+        self._remembered_version_id = None
+
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+
+        # ========== 配置区 ==========
+        config_box = QGroupBox("配置")
+        form = QFormLayout(config_box)
+
+        self.mc_dir_input = QLineEdit(DEFAULT_MC_DIR)
+        form.addRow("MC 目录:", self.mc_dir_input)
+
+        self.java_input = QLineEdit(DEFAULT_JAVA)
+        form.addRow("Java 路径:", self.java_input)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("版本:"))
+        self.version_combo = QComboBox()
+        self.version_combo.setMinimumWidth(320)
+        self.version_combo.setEditable(False)
+        row.addWidget(self.version_combo)
+
+        self.reload_btn = QPushButton("🔄")
+        self.reload_btn.setFixedSize(32, 32)
+        self.reload_btn.setToolTip("重新拉取版本清单")
+        self.reload_btn.clicked.connect(self.load_manifest)
+        row.addWidget(self.reload_btn)
+
+        row.addSpacing(15)
+        row.addWidget(QLabel("玩家名:"))
+        self.username_input = QLineEdit(DEFAULT_USERNAME)
+        self.username_input.setFixedWidth(110)
+        row.addWidget(self.username_input)
+
+        row.addSpacing(15)
+        row.addWidget(QLabel("内存(MB):"))
+        self.memory_input = QLineEdit(str(DEFAULT_MEMORY))
+        self.memory_input.setFixedWidth(80)
+        row.addWidget(self.memory_input)
+        row.addStretch()
+
+        row_widget = QWidget()
+        row_widget.setLayout(row)
+        form.addRow("", row_widget)
+
+        layout.addWidget(config_box)
+
+        # ========== 按钮区 ==========
+        btn_row = QHBoxLayout()
+
+        self.launch_btn = QPushButton("▶  启动游戏")
+        self.launch_btn.setFixedHeight(52)
+        self.launch_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3fa34d;
+                color: white;
+                font-size: 16px;
+                font-weight: bold;
+                border: none;
+                border-radius: 8px;
+            }
+            QPushButton:hover { background-color: #4bb85a; }
+            QPushButton:pressed { background-color: #348a40; }
+            QPushButton:disabled { background-color: #555; color: #999; }
+        """)
+        self.launch_btn.clicked.connect(self.on_launch)
+
+        self.download_btn = QPushButton("⬇  下载原版")
+        self.download_btn.setFixedHeight(52)
+        self.download_btn.setFixedWidth(130)
+        self.download_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4a9eff;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                border: none;
+                border-radius: 8px;
+            }
+            QPushButton:hover { background-color: #5aaeff; }
+            QPushButton:disabled { background-color: #555; color: #999; }
+        """)
+        self.download_btn.clicked.connect(self.on_download)
+
+        self.forge_btn = QPushButton("🔧  安装 Forge")
+        self.forge_btn.setFixedHeight(52)
+        self.forge_btn.setFixedWidth(140)
+        self.forge_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d97706;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                border: none;
+                border-radius: 8px;
+            }
+            QPushButton:hover { background-color: #ea8a17; }
+            QPushButton:disabled { background-color: #555; color: #999; }
+        """)
+        self.forge_btn.clicked.connect(self.on_install_forge)
+
+        self.stop_btn = QPushButton("■  停止")
+        self.stop_btn.setFixedHeight(52)
+        self.stop_btn.setFixedWidth(100)
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self.on_stop)
+
+        self.clear_btn = QPushButton("清空")
+        self.clear_btn.setFixedHeight(52)
+        self.clear_btn.setFixedWidth(80)
+        self.clear_btn.clicked.connect(lambda: self.log_text.clear())
+
+        btn_row.addWidget(self.launch_btn, 1)
+        btn_row.addWidget(self.download_btn)
+        btn_row.addWidget(self.forge_btn)
+        btn_row.addWidget(self.stop_btn)
+        btn_row.addWidget(self.clear_btn)
+        layout.addLayout(btn_row)
+
+        # ========== 日志区 ==========
+        layout.addWidget(QLabel("日志:"))
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setFont(QFont("Consolas", 9))
+        self.log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: 1px solid #333;
+                border-radius: 6px;
+            }
+        """)
+        layout.addWidget(self.log_text, 1)
+
+        self.worker = None
+        self.download_worker = None
+        self.forge_worker = None
+
+        self.log("就绪。")
+        self.log(f"MC 目录: {DEFAULT_MC_DIR}")
+        self.log(f"Java: {DEFAULT_JAVA}")
+
+        self.load_manifest()
+
+    def log(self, msg):
+        self.log_text.append(msg)
+        sb = self.log_text.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    # ---------- 版本清单 ----------
+    def load_manifest(self):
+        current = self._get_selected_version()
+        self._remembered_version_id = current["id"] if current else None
+
+        self.version_combo.clear()
+        self.version_combo.addItem("（加载中...）")
+        self.version_combo.setEnabled(False)
+
+        self.manifest_fetcher = ManifestFetcher()
+        self.manifest_fetcher.log.connect(self.log)
+        self.manifest_fetcher.finished.connect(self._on_manifest_loaded)
+        threading.Thread(target=self.manifest_fetcher.run, daemon=True).start()
+
+    def _on_manifest_loaded(self, versions):
+        self.manifest_versions = versions
+        self.version_combo.clear()
+
+        if not versions:
+            self.version_combo.addItem("（获取失败）")
+            return
+
+        local_installed = self._get_installed_versions()
+        release_versions = [v for v in versions if v.get("type") == "release"]
+        snapshot_versions = [v for v in versions if v.get("type") == "snapshot"]
+        old_versions = [v for v in versions if v.get("type") in ("old_beta", "old_alpha")]
+
+        release_versions.sort(key=lambda v: v.get("releaseTime", ""), reverse=True)
+        snapshot_versions.sort(key=lambda v: v.get("releaseTime", ""), reverse=True)
+
+        def add_section(label, ver_list):
+            if not ver_list:
+                return
+            self.version_combo.insertSeparator(self.version_combo.count())
+            self.version_combo.addItem(f"── {label} ──")
+            idx = self.version_combo.count() - 1
+            self.version_combo.model().item(idx).setEnabled(False)
+            for v in ver_list:
+                vid = v["id"]
+                mark = "  [已安装]" if vid in local_installed else ""
+                self.version_combo.addItem(f"{vid}{mark}", userData=v)
+            self.version_combo.insertSeparator(self.version_combo.count())
+
+        if release_versions:
+            first = release_versions[0]
+            mark = "  [已安装]" if first["id"] in local_installed else ""
+            self.version_combo.addItem(f"{first['id']}{mark}", userData=first)
+            add_section("正式版", release_versions[1:])
+        add_section("快照", snapshot_versions)
+        add_section("远古版", old_versions)
+
+        self.version_combo.setEnabled(True)
+
+        restored = False
+        remembered = self._remembered_version_id
+        if remembered:
+            for i in range(self.version_combo.count()):
+                data = self.version_combo.itemData(i)
+                if isinstance(data, dict) and data.get("id") == remembered:
+                    self.version_combo.setCurrentIndex(i)
+                    restored = True
+                    self.log(f"✓ 已恢复选中版本: {remembered}")
+                    break
+
+        if not restored:
+            self.version_combo.setCurrentIndex(0)
+
+        self.log(f"✓ 版本下拉框已填充（{len(versions)} 个可选）")
+
+    def _get_installed_versions(self):
+        mc_dir = Path(self.mc_dir_input.text().strip())
+        versions_dir = mc_dir / "versions"
+        if not versions_dir.exists():
+            return set()
+        try:
+            result = set()
+            for p in versions_dir.iterdir():
+                if p.is_dir() and list(p.glob("*.json")):
+                    result.add(p.name)
+            return result
+        except:
+            return set()
+
+    def _get_selected_version(self):
+        data = self.version_combo.currentData()
+        if data and isinstance(data, dict):
+            return data
+        return None
+
+    def _refresh_installed_marks(self):
+        installed = self._get_installed_versions()
+        for i in range(self.version_combo.count()):
+            data = self.version_combo.itemData(i)
+            if not isinstance(data, dict):
+                continue
+            vid = data["id"]
+            mark = "  [已安装]" if vid in installed else ""
+            self.version_combo.setItemText(i, f"{vid}{mark}")
+
+    # ---------- 启动 ----------
+    def on_launch(self):
+        vinfo = self._get_selected_version()
+        if not vinfo:
+            self.log("❌ 请先选择一个版本")
+            return
+
+        version = vinfo["id"]
+        config = {
+            "mc_dir": self.mc_dir_input.text().strip(),
+            "java": self.java_input.text().strip(),
+            "version": version,
+            "username": self.username_input.text().strip(),
+            "memory": int(self.memory_input.text().strip() or "2048"),
+        }
+        config["version_dir"] = Path(config["mc_dir"]) / "versions" / version
+
+        if not Path(config["mc_dir"]).exists():
+            self.log(f"❌ MC 目录不存在: {config['mc_dir']}")
+            return
+        json_path = config["version_dir"] / f"{version}.json"
+        if not json_path.exists():
+            self.log(f"❌ 版本 JSON 不存在: {json_path}")
+            return
+        if not Path(config["java"]).exists():
+            self.log(f"❌ Java 不存在: {config['java']}")
+            return
+
+        self.launch_btn.setEnabled(False)
+        self.download_btn.setEnabled(False)
+        self.forge_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+
+        self.worker = Worker(config)
+        self.worker.log.connect(self.log)
+        self.worker.finished.connect(self._on_launch_finished)
+        threading.Thread(target=self.worker.launch, daemon=True).start()
+
+    def _on_launch_finished(self):
+        self.launch_btn.setEnabled(True)
+        self.download_btn.setEnabled(True)
+        self.forge_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+
+    def on_stop(self):
+        if self.worker:
+            self.worker.stop()
+
+    # ---------- 下载原版 ----------
+    def on_download(self):
+        vinfo = self._get_selected_version()
+        if not vinfo:
+            self.log("❌ 请先选择一个版本")
+            return
+
+        version = vinfo["id"]
+        mc_dir = self.mc_dir_input.text().strip()
+
+        if not Path(mc_dir).exists():
+            self.log(f"❌ MC 目录不存在: {mc_dir}")
+            return
+
+        version_dir = Path(mc_dir) / "versions" / version
+        if (version_dir / f"{version}.json").exists():
+            reply = QMessageBox.question(
+                self, "重新下载？",
+                f"版本 {version} 已存在。\n要重新下载吗？（会覆盖）",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        else:
+            reply = QMessageBox.question(
+                self, "确认下载",
+                f"下载版本：{version}\n类型：{vinfo.get('type', 'unknown')}\n"
+                f"发布时间：{vinfo.get('releaseTime', '')[:10]}\n\n"
+                f"保存到：{mc_dir}\n"
+                f"可能几百 MB ~ 几 GB，确定吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        self.launch_btn.setEnabled(False)
+        self.download_btn.setEnabled(False)
+        self.forge_btn.setEnabled(False)
+        self.log("=" * 60)
+        self.log(f"开始下载版本: {version}")
+
+        self.download_worker = DownloadWorker(
+            version, mc_dir, vinfo["url"], vinfo.get("sha1")
+        )
+        self.download_worker.log.connect(self.log)
+        self.download_worker.progress.connect(self._on_download_progress)
+        self.download_worker.finished.connect(self._on_download_finished)
+        threading.Thread(target=self.download_worker.run, daemon=True).start()
+
+    def _on_download_progress(self, done, total, failed):
+        self.log(f"    进度: {done}/{total} (失败 {failed})")
+
+    def _on_download_finished(self, success):
+        self.launch_btn.setEnabled(True)
+        self.download_btn.setEnabled(True)
+        self.forge_btn.setEnabled(True)
+        if success:
+            self.log("🎉 下载完成！")
+            self._refresh_installed_marks()
+
+    # ---------- 安装 Forge ----------
+    def on_install_forge(self):
+        vinfo = self._get_selected_version()
+        if not vinfo:
+            self.log("❌ 请先选择一个版本")
+            return
+
+        mc_version = vinfo["id"]
+        mc_dir = self.mc_dir_input.text().strip()
+        java_path = self.java_input.text().strip()
+
+        if not Path(mc_dir).exists():
+            self.log(f"❌ MC 目录不存在: {mc_dir}")
+            return
+        if not Path(java_path).exists():
+            self.log(f"❌ Java 不存在: {java_path}")
+            return
+
+        # 检查原版是否已安装
+        version_dir = Path(mc_dir) / "versions" / mc_version
+        if not (version_dir / f"{mc_version}.json").exists():
+            self.log(f"❌ 原版 {mc_version} 还没下载，请先下载原版")
+            return
+
+        # 拉取 Forge 列表
+        self.log(f"正在获取 MC {mc_version} 的 Forge 列表...")
+        try:
+            ForgeDownloader(log_callback=self.log)
+            forge_list = dl.get_forge_versions(mc_version)
+        except Exception as e:
+            self.log(f"❌ 获取 Forge 列表失败: {e}")
+            return
+
+        if not forge_list:
+            self.log(f"❌ MC {mc_version} 没有可用的 Forge 版本")
+            return
+
+        self.log(f"✓ 找到 {len(forge_list)} 个 Forge 版本")
+
+        # 弹窗选择
+        dlg = ForgeSelectDialog(mc_version, forge_list, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        if not dlg.selected:
+            return
+
+        forge_version = dlg.selected["version"]
+        reply = QMessageBox.question(
+            self, "确认安装",
+            f"即将安装：\n"
+            f"MC 版本: {mc_version}\n"
+            f"Forge 版本: {forge_version}\n"
+            f"Build: {dlg.selected['build']}\n\n"
+            f"安装器会自动下载依赖（几百 MB），确定吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.launch_btn.setEnabled(False)
+        self.download_btn.setEnabled(False)
+        self.forge_btn.setEnabled(False)
+        self.log("=" * 60)
+        self.log(f"开始安装 Forge {forge_version} for MC {mc_version}")
+
+        self.forge_worker = ForgeInstallWorker(mc_version, forge_version, mc_dir, java_path)
+        self.forge_worker.log.connect(self.log)
+        self.forge_worker.progress.connect(self._on_forge_progress)
+        self.forge_worker.finished.connect(self._on_forge_finished)
+        threading.Thread(target=self.forge_worker.run, daemon=True).start()
+
+    def _on_forge_progress(self, done, total):
+        if done % (1024 * 1024) < 8192:
+            self.log(f"    下载: {done / 1024 / 1024:.1f} MB / {total / 1024 / 1024:.1f} MB")
+
+    def _on_forge_finished(self, success):
+        self.launch_btn.setEnabled(True)
+        self.download_btn.setEnabled(True)
+        self.forge_btn.setEnabled(True)
+        if success:
+            self.log("🎉 Forge 安装完成！刷新列表查看新版本")
+            self.load_manifest()
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
