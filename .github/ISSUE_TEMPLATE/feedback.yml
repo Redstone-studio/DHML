@@ -1,7 +1,7 @@
 name: 反馈 / 建议
 description: 提交 BUG 报告或功能建议
 title: "[反馈] "
-labels: ["feedback"]
+labels: ["feedback", "needs-triage"]
 assignees: []
 
 body:
@@ -82,7 +82,7 @@ body:
     validations:
       required: false
 
-  # ========== 确认：搜索过 Issue（下拉框，不可再点） ==========
+  # ========== 确认（下拉框，不可再点） ==========
   - type: dropdown
     id: confirm_search
     attributes:
@@ -93,7 +93,6 @@ body:
     validations:
       required: true
 
-  # ========== 确认：最新版（下拉框，不可再点） ==========
   - type: dropdown
     id: confirm_latest
     attributes:
