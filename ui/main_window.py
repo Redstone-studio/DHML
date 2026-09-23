@@ -22,8 +22,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_NAME)
-        self.resize(1080, 700)
-        self.setMinimumSize(900, 580)
+        self.resize(1280, 820)
+        self.setMinimumSize(1040, 620)
 
         self.account_manager = AccountManager()
 
@@ -60,6 +60,14 @@ class MainWindow(QMainWindow):
         accounts_page.add_requested.connect(self.open_new_account_dialog)
 
         self.pages["settings"].config_changed.connect(self._on_config_changed)
+        # 版本页也能换游戏目录（设置页那张卡片已经搬过去了）
+        versions_page = self.pages["versions"]
+        versions_page.config_changed.connect(self._on_config_changed)
+        # 版本页选中的版本 = 启动页面板上的版本（两个页面共用一个"当前版本"）
+        versions_page.version_selected.connect(self.pages["home"].set_version)
+        # 启动页点「选择版本」→ 切到版本页
+        self.pages["home"].versions_requested.connect(
+            lambda: self.switch_page("versions"))
 
         # 主题和语言改到"个性化"页了
         personalize = self.pages["personalize"]
@@ -89,8 +97,8 @@ class MainWindow(QMainWindow):
             return
         self.stack.setCurrentWidget(page)
         self.sidebar.set_active(key)
-        # 切到版本页时刷新一下（那里显示的是完整清单）
-        if key == "versions":
+        # 切到版本页 / 启动页时刷新一下（版本列表和面板上的信息都来自扫描）
+        if key in ("versions", "home"):
             page.reload_versions()
 
     # ---------- 语言 ----------
@@ -129,6 +137,30 @@ class MainWindow(QMainWindow):
         """把配置里的 system/dark/light 落到实际的 dark/light"""
         return theme.effective_mode(config.get("theme", "system"), self._system_is_dark())
 
+    def closeEvent(self, event):
+        """关窗口时收拾后台线程
+
+        ⚠️ Qt 的规矩：**销毁一个还在运行的 QThread 会让 Qt 直接终止进程**
+        （连 Python 的异常都来不及抛，stdout 缓冲也全丢）。所以：
+          - 扫描 Java 这种"可等"的任务：等一下，通常几百毫秒就完
+          - 启动游戏的任务：**不能等**（关了启动器游戏还要继续跑），
+            所以把它从父对象上摘下来，让 Qt 别去销毁它
+        """
+        for page in getattr(self, "pages", {}).values():
+            scan = getattr(page, "_java_scan", None)
+            if scan is not None and scan.isRunning():
+                scan.wait(3000)
+
+            launch = getattr(page, "_task", None)
+            if launch is not None and launch.isRunning():
+                launch.setParent(None)      # 摘出去：进程退出时别带着它一起销毁
+
+            repair = getattr(page, "_repair_task", None)
+            if repair is not None and repair.isRunning():
+                repair.wait(3000)
+
+        super().closeEvent(event)
+
     def load_styles(self):
         """加载样式表
 
@@ -157,6 +189,13 @@ class MainWindow(QMainWindow):
             print(f"[UI] app.qss 里有没被替换的变量（写错名字了？）: {left}")
 
         self.setStyleSheet(qss)
+
+        # 自绘 / 手写格式的控件不吃 QSS（开关、日志行的级别颜色），
+        # 得让它们自己重刷一遍。用鸭子类型而不是写死类型，页面按需实现即可。
+        for page in self.pages.values():
+            refresh = getattr(page, "refresh_theme", None)
+            if callable(refresh):
+                refresh()
 
     def _on_system_color_scheme_changed(self, *_args):
         """系统深浅色变了。只有"跟随系统"时才有必要重刷"""

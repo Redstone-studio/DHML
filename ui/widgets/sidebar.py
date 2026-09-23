@@ -83,9 +83,12 @@ class Sidebar(TranslatableWidget):
     # (页面 key, 图标, 文案)
     # 图标全部用几何符号而不是 emoji：emoji 在缺字体的机器上会变豆腐块，
     # 这些符号在 Segoe UI Symbol 里一定有。
+    #
+    # 「版本」不在导航里：启动页那块面板上有「选择版本」（点了切过去），
+    # 侧边栏再留一个入口就是同一件事两个门（用户 2026-09 要求去掉）。
+    # 页面本身还在，switch_page("versions") 照样能用。
     NAV_ITEMS = (
         ("home", "\u25b6", "启动"),
-        ("versions", "\u25a4", "版本"),
         ("accounts", "\u25c9", "账户"),
         ("personalize", "\u25d0", "个性化"),
         ("settings", "\u2699", "设置"),

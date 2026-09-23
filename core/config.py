@@ -5,39 +5,228 @@
 default_minecraft_dir）。两边都是延迟导入，所以不会死循环，但它是个环形依赖，
 以后重构要小心。
 
-TODO(未修): load() 只保留 DEFAULT_CONFIG 里存在的键，配置文件里的未知键会被
-丢弃；而下一次 save() 会把整个 self.data 写回去，那些键就永久消失了。
-将来加字段后用户回退旧版本、或手动编辑过 config.json 时会丢配置。
+## 这个文件是给人看的，也是给人改的
+
+所以：**不认识的键会原样留着**。旧版本写进去的字段、或者用户自己加的字段，
+都不会被静默丢掉 —— 以前 load() 只保留 DEFAULT_CONFIG 里有的键，于是
+"回退旧版本 / 手改过配置" 都会在下一次 save() 时永久丢数据。
+一条读不出来的配置（写了一半、手改坏了）也只会退回默认值，不会让程序起不来。
+
+## 写的时候是原子的
+
+先写 config.json.tmp，fsync，再 os.replace 替换过去。直接覆写的话，
+写到一半断电/被杀进程就只剩半个 JSON，下次启动读不出来，用户的配置全丢。
 """
 
 import json
 import os
+import re
 from pathlib import Path
+
+from core.resources import app_dir
+
+# 配置格式版本。以后要改结构（挪字段、改名）就 +1，并在 _migrate() 里补一段，
+# 这样老用户的配置能平滑升上来。
+CONFIG_VERSION = 1
+
+# ---------- 便携模式 ----------
+#
+# 默认配置放 %APPDATA%\MCLuncher（跟系统规矩走，装在 Program Files 里也能写）。
+# 想"拷走整个文件夹就带走设置"（绿色版）的话，在**启动器目录**下放一个
+# portable.txt 就行 —— 也可以直接把 MCLuncher 目录拷到启动器旁边，
+# 那样不用标记文件也会被认出来。
+#
+# 三个必须处理的情况：
+#   1. 打包后 __file__ 在 _internal 里 → 用 core/resources.app_dir()
+#   2. Program Files 下写不进去 → 探测一次，写不进去就老实退回 %APPDATA%
+#   3. 从 %APPDATA% 切过来的老用户 → 把已有的几个文件**拷**过来（不是移动，也不覆盖）
+PORTABLE_MARKER = "portable.txt"
+DATA_DIR_NAME = "MCLuncher"
+
+# 切到便携模式时要带过去的文件（就这几个，别的都是临时/缓存）
+_PORTABLE_FILES = ("config.json", "accounts.json", "versions.json")
+
+
+def _system_config_dir() -> Path:
+    if os.name == "nt":
+        return Path(os.environ.get("APPDATA", Path.home())) / DATA_DIR_NAME
+    return Path.home() / ".config" / DATA_DIR_NAME
+
+
+def _portable_dir() -> Path:
+    return app_dir() / DATA_DIR_NAME
+
+
+def _writable(path: Path) -> bool:
+    """探测目录能不能写。只看权限，不留垃圾文件"""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".write-test"
+        probe.write_text("", encoding="utf-8")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def _portable_requested() -> bool:
+    """用户想不想要便携模式：放了标记文件，或者数据目录已经在旁边了"""
+    try:
+        if (app_dir() / PORTABLE_MARKER).is_file():
+            return True
+        return _portable_dir().is_dir()
+    except OSError:
+        return False
+
+
+def _migrate_to_portable(target: Path):
+    """把 %APPDATA% 里已有的配置拷一份过来
+
+    只拷**目标里没有**的，绝不覆盖 —— 用户可能已经在新位置放了东西。
+    原文件留着不动：万一是误判（比如把便携目录删了），退回系统目录还能用。
+    """
+    source = _system_config_dir()
+    if not source.is_dir() or source == target:
+        return
+    for name in _PORTABLE_FILES:
+        old = source / name
+        new = target / name
+        if old.is_file() and not new.exists():
+            try:
+                new.write_bytes(old.read_bytes())
+                print(f"[Config] 便携模式：已从 {old} 拷来 {name}")
+            except OSError as e:
+                print(f"[Config] 便携模式：{name} 拷不过来（{e}）")
 
 
 def get_config_dir() -> Path:
-    """和 accounts.py 保持一致"""
-    if os.name == "nt":
-        base = Path(os.environ.get("APPDATA", Path.home()))
-    else:
-        base = Path.home() / ".config"
-    d = base / "MCLuncher"
+    """配置目录：便携模式下是启动器旁边的 MCLuncher，否则是 %APPDATA%\\MCLuncher"""
+    if _portable_requested():
+        target = _portable_dir()
+        if _writable(target):
+            _migrate_to_portable(target)
+            return target
+        # 装在 Program Files、又没有管理员权限时会走到这儿。
+        # 静默退回系统目录，不然启动器直接起不来。
+        print(f"[Config] {target} 写不进去，这轮回退到系统配置目录")
+
+    d = _system_config_dir()
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def is_portable() -> bool:
+    """当前是不是在用便携模式（设置页要显示出来）"""
+    try:
+        return get_config_dir() == _portable_dir()
+    except OSError:
+        return False
 
 
 CONFIG_FILE = get_config_dir() / "config.json"
 
 DEFAULT_CONFIG = {
+    "config_version": CONFIG_VERSION,
     "minecraft_dir": "",      # 空字符串 = 用默认路径
     "java_path": "",          # 空 = 自动找
     "max_memory": 2048,       # MB
     "min_memory": 512,
     "close_on_launch": False, # 启动后关闭启动器
-    "language": "zh_CN",      # 界面语言，见 core/i18n.py
+    "show_log_window": True,  # 启动游戏后自动打开日志窗口
+    "language": "",            # 界面语言；留空 = 首次启动按系统语言定（见 core/i18n.py）
     "theme": "system",        # system / dark / light，见 core/theme.py
     "accent_color": "",       # 空 = 用主题自带的强调色；否则 "#rrggbb"
+    "last_version": "",       # 上次启动的版本 id，首页默认选中它
 }
+
+THEME_MODES = ("system", "dark", "light")
+_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+# ---------- 类型纠正 ----------
+#
+# as_int / as_bool / as_str 是**公开**的：core/version_settings.py 也要用
+# （同一类"手改过的配置文件"问题，别再抄一份）。
+#
+# 配置文件人手改过之后，值可能是 "4096"（字符串）、"false"（字符串）、
+# 或者干脆是乱七八糟的东西。与其让它在很远的地方炸掉（比如 bool("false") 是 True，
+# 或者主题色拼错导致整个样式表算不出来），不如在读进来的时候就纠正一次。
+#
+# 注意：只动**认识的**键，不认识的键原样保留。
+
+def as_int(value, fallback):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def as_bool(value, fallback):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        low = value.strip().lower()
+        if low in ("true", "yes", "on", "1"):
+            return True
+        if low in ("false", "no", "off", "0"):
+            return False
+        return fallback
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return fallback
+
+
+def as_str(value, fallback):
+    return value if isinstance(value, str) else (fallback if value is None else str(value))
+
+
+def _as_theme(value, fallback):
+    return value if value in THEME_MODES else fallback
+
+
+def _as_color(value, fallback):
+    """强调色只接受 #rrggbb，别的（拼错、写成颜色名）一律退回默认
+
+    core/theme.py 会拿它做颜色运算，喂进去一个非法值会直接抛异常，
+    那样整个界面就没样式了 —— 手滑改错一个字符不该有这种后果。
+    """
+    if isinstance(value, str) and _COLOR_RE.match(value.strip()):
+        return value.strip()
+    return fallback
+
+
+_COERCE = {
+    "config_version": as_int,
+    "min_memory": as_int,
+    "max_memory": as_int,
+    "close_on_launch": as_bool,
+    "show_log_window": as_bool,
+    "minecraft_dir": as_str,
+    "java_path": as_str,
+    "language": as_str,
+    "theme": _as_theme,
+    "accent_color": _as_color,
+    "last_version": as_str,
+}
+
+
+def _migrate(data: dict) -> dict:
+    """把老格式的配置升到当前版本
+
+    现在还没有要改的东西，留着这个函数是为了以后：**每次改结构都在这儿加一段**，
+    而且只处理"老版本 → 新版本"的差异，不要写成"每次都跑一遍"的幂等逻辑，
+    否则以后加第二段时很容易互相踩。
+    """
+    version = as_int(data.get("config_version"), 0)
+    if version >= CONFIG_VERSION:
+        return data
+
+    if version < 1:
+        # 最早的配置没有 config_version，也没有 last_version —— 缺的交给默认值
+        pass
+
+    data["config_version"] = CONFIG_VERSION
+    return data
 
 
 class Config:
@@ -48,29 +237,60 @@ class Config:
         self.load()
 
     def load(self):
+        loaded = {}
         if CONFIG_FILE.exists():
             try:
                 # 读字节：让 json 自己处理 BOM。手动存过 config.json 的话，
                 # 编辑器可能加了 BOM，用 encoding="utf-8" 读会直接抛异常
-                loaded = json.loads(CONFIG_FILE.read_bytes())
-                if isinstance(loaded, dict):
-                    # 和默认值合并，防止旧版本配置缺字段
-                    self.data.update({k: loaded[k] for k in DEFAULT_CONFIG if k in loaded})
+                raw = json.loads(CONFIG_FILE.read_bytes())
             except Exception as e:
-                print(f"[Config] 读取失败: {e}")
+                print(f"[Config] 读取失败，这次用默认值: {e}")
+                raw = None
+            if isinstance(raw, dict):
+                loaded = raw
+            elif raw is not None:
+                print("[Config] 配置不是键值对，忽略")
+        self.data = self._normalize(loaded)
+
+    def _normalize(self, loaded: dict) -> dict:
+        """默认值 + 文件里的值（包括不认识的键）"""
+        data = dict(DEFAULT_CONFIG)
+        data.update(loaded)          # 未知键也一起进来，不做过滤
+        data = _migrate(data)
+        for key, coerce in _COERCE.items():
+            data[key] = coerce(data.get(key), DEFAULT_CONFIG.get(key))
+        return data
 
     def save(self):
-        CONFIG_FILE.write_text(
-            json.dumps(self.data, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
+        """原子写。返回是否写成功（写不进去只打日志，不抛异常）
+
+        调用方大多是"用户改了个开关"，这种时候宁可这次没存上，
+        也不该把整个界面崩掉。
+        """
+        text = json.dumps(self.data, ensure_ascii=False, indent=2) + "\n"
+        tmp = CONFIG_FILE.parent / (CONFIG_FILE.name + ".tmp")
+        try:
+            CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, CONFIG_FILE)
+            return True
+        except OSError as e:
+            print(f"[Config] 保存失败: {e}")
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return False
 
     def get(self, key, default=None):
         return self.data.get(key, default if default is not None else DEFAULT_CONFIG.get(key))
 
     def set(self, key, value):
         self.data[key] = value
-        self.save()
+        return self.save()
 
     def get_minecraft_dir(self) -> Path:
         """返回有效的 .minecraft 路径

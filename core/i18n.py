@@ -15,6 +15,9 @@
 """
 
 import json
+import locale
+import os
+import sys
 
 from core.config import config
 from core.resources import resource_path
@@ -78,6 +81,100 @@ def language_name(code: str) -> str:
 
 # ---------- 切换与取值 ----------
 
+
+# ============================================================
+# 系统语言
+# ============================================================
+
+def _normalize_locale(tag: str) -> str:
+    """把各种写法的语言标记归到我们支持的那几种
+
+    输入可能是 "zh-CN"（BCP-47）、"zh_CN"（POSIX）、
+    "Chinese (Simplified)_China"（Windows 的老写法）……
+    """
+    if not tag:
+        return ""
+    raw = tag.replace("-", "_")
+    parts = [x for x in raw.split("_") if x]
+    if not parts:
+        return ""
+    lang = parts[0].lower()
+    region = parts[1].upper() if len(parts) > 1 else ""
+
+    if lang == "zh" or "chinese" in lang:
+        # 中文必须分简繁，不然台湾用户会看到简体
+        if region in ("TW", "HK", "MO") or "HANT" in raw.upper() or "Traditional" in tag:
+            return "zh_TW"
+        return "zh_CN"
+
+    for prefix, code in (("en", "en_US"), ("ja", "ja_JP"), ("ru", "ru_RU"),
+                         ("japanese", "ja_JP"), ("russian", "ru_RU"),
+                         ("english", "en_US")):
+        if lang.startswith(prefix):
+            return code
+
+    # 不支持的语言退回英文 —— 总比让外国用户看到中文强
+    return "en_US"
+
+
+def system_locale() -> str:
+    """猜系统界面语言，返回我们支持的语言代码
+
+    Windows 上用 GetUserDefaultLocaleName —— 它给的是干净的 BCP-47（"zh-CN"）。
+    Python 的 locale 模块在 Windows 上会返回
+    "Chinese (Simplified)_China" 这种老写法，而且 getdefaultlocale()
+    在 3.15 里已经被标记要删除了，所以只当兜底。
+    """
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(85)
+            if ctypes.windll.kernel32.GetUserDefaultLocaleName(buf, 85) and buf.value:
+                got = _normalize_locale(buf.value)
+                if got:
+                    return got
+        except Exception:
+            pass
+
+    for tag in (_python_locale(), os.environ.get("LANG", ""),
+                os.environ.get("LANGUAGE", "")):
+        got = _normalize_locale(tag)
+        if got:
+            return got
+    return "en_US"
+
+
+def _python_locale() -> str:
+    import warnings
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return (locale.getdefaultlocale() or (None, None))[0] or ""
+    except Exception:
+        return ""
+
+
+def resolve_language() -> str:
+    """启动时决定用哪个语言：配置里存过就用存的，没存过就按系统语言定
+
+    定完顺手写回配置 —— 这样设置页里显示的就是当前实际在用的，
+    用户想改也改得掉。
+    """
+    try:
+        saved = config.get("language", "")
+    except Exception:
+        saved = ""
+    if saved:
+        return saved
+
+    detected = system_locale()
+    try:
+        config.set("language", detected)
+    except Exception:
+        pass        # 写不进去也不影响这次启动
+    return detected
+
+
 def set_language(lang: str):
     """切换语言。注意：这只会换词典，界面上已经建好的控件要自己重设文字 ——
     见 ui/translatable.py 的 TranslatableWidget。"""
@@ -114,4 +211,4 @@ def tr(text: str, **fmt) -> str:
 
 
 # 启动时按配置加载
-set_language(config.get("language") or FALLBACK_LANG)
+set_language(resolve_language())

@@ -6,13 +6,13 @@
 不要在别处缓存这个字典 —— 那样语言切换后它不会更新。
 """
 
-import hashlib
 import json
 import os
 from datetime import datetime
 from pathlib import Path
 
 from core.i18n import tr
+from core.launch import offline_uuid
 
 # 账户类型的**源文案**（中文即 key，见 core/i18n.py）
 _TYPE_LABELS = {
@@ -28,18 +28,14 @@ def type_label(key: str) -> str:
 
 
 def get_config_dir() -> Path:
-    """跨平台的配置目录
+    """配置目录。
 
-    （和 core/config.py 里的同名函数重复了。两边都硬编码了 "MCLuncher"
-    这个目录名，改的时候记得同时改。）
+    以前这里抄了一份 core/config.py 的同名函数（两边都硬编码 "MCLuncher"），
+    做便携模式时这种重复会立刻咬人 —— 便携判断只能有一处。
+    所以现在直接转给 core/config.py 的那一个。
     """
-    if os.name == "nt":  # Windows
-        base = Path(os.environ.get("APPDATA", Path.home()))
-    else:
-        base = Path.home() / ".config"
-    d = base / "MCLuncher"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    from core.config import get_config_dir as _shared
+    return _shared()
 
 
 ACCOUNTS_FILE = get_config_dir() / "accounts.json"
@@ -61,6 +57,28 @@ class AccountManager:
             except Exception as e:
                 print(f"[Accounts] load failed: {e}")
                 self.accounts, self.current = [], None
+        self._repair_offline_uuids()
+
+    def _repair_offline_uuids(self):
+        """修掉历史遗留的错误离线 UUID
+
+        早期版本是把 MD5 直接拼成 UUID 的，**漏了置版本位和 variant 位** ——
+        那些值不是合法 UUID，而且和 PCL / HMCL 算出来的不一样，
+        会让同一个玩家在存档和服务器里被当成两个人。
+
+        离线 UUID 是玩家名的纯函数，重算一次就行，不用问用户。
+        """
+        changed = 0
+        for account in self.accounts:
+            if account.get("type") != "offline":
+                continue
+            correct = offline_uuid(account.get("name", ""))
+            if account.get("uuid") != correct:
+                account["uuid"] = correct
+                changed += 1
+        if changed:
+            print(f"[Accounts] 修正了 {changed} 个离线 UUID（旧值漏了版本位）")
+            self.save()
 
     def save(self):
         data = {"accounts": self.accounts, "current": self.current}
@@ -70,14 +88,13 @@ class AccountManager:
         )
 
     def add_offline(self, name: str):
-        # 生成离线 UUID（和 Minecraft 一致：基于 "OfflinePlayer:<name>" 的 MD5）
-        md5 = hashlib.md5(f"OfflinePlayer:{name}".encode()).hexdigest()
-        uuid_str = f"{md5[:8]}-{md5[8:12]}-{md5[12:16]}-{md5[16:20]}-{md5[20:]}"
-
+        # 离线 UUID = "OfflinePlayer:<名字>" 的 MD5，再按规范置版本位 / variant 位。
+        # 实现在 core/launch.py 里（那边有说明和测试值）——
+        # 这里当初自己抄了一份，抄的时候漏了置位，才出的这个 bug。
         acc = {
             "type": "offline",
             "name": name,
-            "uuid": uuid_str,
+            "uuid": offline_uuid(name),
             "created_at": datetime.now().isoformat(timespec="seconds"),
         }
         # 同名覆盖
