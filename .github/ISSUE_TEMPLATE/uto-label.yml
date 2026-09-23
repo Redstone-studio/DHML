@@ -1,0 +1,52 @@
+name: Auto Label Issue
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto label by feedback type
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const body = issue.body || "";
+            
+            // 从 Issue 内容里找"反馈类型"
+            // Issue Forms 提交后，内容里有类似：
+            //   ### 反馈类型
+            //   🐛 BUG
+            let labelsToAdd = [];
+            
+            if (body.includes("💥 严重 BUG")) {
+              labelsToAdd.push("bug");
+              labelsToAdd.push("severity: critical");
+            } else if (body.includes("🐛 BUG")) {
+              labelsToAdd.push("bug");
+            } else if (body.includes("💡 功能建议")) {
+              labelsToAdd.push("enhancement");
+            } else if (body.includes("📝 其他")) {
+              labelsToAdd.push("question");
+            }
+            
+            if (labelsToAdd.length === 0) {
+              console.log("未匹配到类型，跳过");
+              return;
+            }
+            
+            console.log("将要添加标签:", labelsToAdd);
+            
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              labels: labelsToAdd,
+            });
+            
+            console.log("✓ 标签已添加");
