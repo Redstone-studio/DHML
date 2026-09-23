@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: 💬 讨论区
+    url: https://github.com/kongxia114/Redstone-Launcher/discussions
+    about: 有想法想讨论？去 Discussions
+  - name: 📖 项目主页
+    url: https://kongxia114.github.io/Redstone-Launcher/
+    about: 查看官网 / 文档
+  - name: 🐛 源码
+    url: https://github.com/kongxia114/Redstone-Launcher
+    about: 查看源代码
