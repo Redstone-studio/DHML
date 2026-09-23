@@ -1,0 +1,82 @@
+name: Build Experiment v3.0 (Onefile)
+
+on:
+  workflow_dispatch:   # 手动触发
+    inputs:
+      version:
+        description: 'Release 版本号（如 v3.0.0-exp）'
+        required: true
+        default: 'v3.0.0-exp'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt6 requests pyinstaller
+
+      # 把实验文件拷到根目录（方便打包，也避免路径问题）
+      - name: Copy source
+        shell: pwsh
+        run: |
+          Copy-Item "experiments/MC_LuncherTEST-3.0.py" -Destination "MC_LuncherTEST-3.0.py"
+
+      # 单文件打包
+      # 注意：Windows 上默认 shell 是 pwsh，多行续行要小心，所以用单行
+      - name: Build (onefile)
+        shell: pwsh
+        run: pyinstaller --noconfirm --windowed --onefile --name "RedstoneLauncher-Experiment-v3.0" "MC_LuncherTEST-3.0.py"
+
+      - name: Show dist
+        shell: pwsh
+        run: |
+          dir dist
+          dir dist\*.exe
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: "RedstoneLauncher Experiment ${{ inputs.version }}"
+          body: |
+            ## 🧪 实验版 RedstoneLauncher ${{ inputs.version }}
+
+            这是**实验程序 v3.0** 的打包版本（单文件）。
+
+            ### ⚠️ 注意
+            这是**实验版本**，不是正式项目。用于测试功能。
+            正式项目请期待 `Redstone Launcher` 的 Release。
+
+            ### 功能
+            - ✅ 版本下拉框（BMCLAPI 官方 + 本地版本）
+            - ✅ 下载原版
+            - ✅ 下载 + 安装 Forge
+            - ✅ 下载 + 安装 Fabric（loader + API）
+            - ✅ 启动原版 / Forge / Fabric
+            - ✅ `inheritsFrom` 合并
+            - ✅ 日志过滤
+
+            ### 首次运行提示
+            未签名软件可能被 Windows SmartScreen 拦截。
+            点"更多信息" → "仍要运行"即可。
+            这不是病毒，[源代码](https://github.com/kongxia114/Redstone-Launcher/blob/main/experiments/MC_LuncherTEST-3.0.py)公开。
+
+            ### 下载
+            见下方 Assets。
+          files: |
+            dist/RedstoneLauncher-Experiment-v3.0.exe
+          prerelease: true
+          draft: false
