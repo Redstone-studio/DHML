@@ -8,13 +8,14 @@ from core import i18n, theme
 from core.accounts import AccountManager
 from core.app_info import APP_DISPLAY_NAME
 from core.config import config
-from core.resources import resource_path, stylesheet_path
+from core.resources import load_stylesheet, resource_path
 from ui.dialogs.new_account_dialog import NewAccountDialog
 from ui.icons import app_icon
 from ui.pages.accounts_page import AccountsPage
 from ui.pages.home_page import HomePage
 from ui.pages.personalize_page import PersonalizePage
 from ui.pages.settings_page import SettingsPage
+from ui.pages.version_settings_page import VersionSettingsPage
 from ui.pages.versions_page import VersionsPage
 from ui.widgets.sidebar import Sidebar
 
@@ -48,12 +49,18 @@ class MainWindow(QMainWindow):
         self.pages = {
             "home": HomePage(self.account_manager),
             "versions": VersionsPage(),
+            # 版本设置是**整页**不是弹窗（2026-09 改）：从启动面板或版本页进来，
+            # 侧边栏不给它入口 —— 它属于"某一个版本"，不是第四个导航项
+            "version_settings": VersionSettingsPage(),
             "accounts": AccountsPage(self.account_manager),
             "personalize": PersonalizePage(),
             "settings": SettingsPage(),
         }
         for page in self.pages.values():
             self.stack.addWidget(page)
+
+        # 「版本设置」页的「返回」回到**进来的那一页**
+        self._settings_return = "versions"
 
         # ---------- 信号 ----------
         self.sidebar.page_changed.connect(self.switch_page)
@@ -69,9 +76,25 @@ class MainWindow(QMainWindow):
         versions_page.config_changed.connect(self._on_config_changed)
         # 版本页选中的版本 = 启动页面板上的版本（两个页面共用一个"当前版本"）
         versions_page.version_selected.connect(self.pages["home"].set_version)
+        # 在版本页双击一个版本 → 直接回启动页（选中已经跟着走了）
+        versions_page.version_activated.connect(self._on_version_activated)
         # 启动页点「选择版本」→ 切到版本页
         self.pages["home"].versions_requested.connect(
             lambda: self.switch_page("versions"))
+
+        # 「版本设置」：两个入口都导航到那一页（不再是弹窗）
+        version_settings_page = self.pages["version_settings"]
+        self.pages["home"].version_settings_requested.connect(
+            self.open_version_settings)
+        versions_page.version_settings_requested.connect(self.open_version_settings)
+        version_settings_page.back_requested.connect(
+            lambda: self.switch_page(self._settings_return))
+        version_settings_page.version_pick_requested.connect(
+            lambda: self.switch_page("versions"))
+        version_settings_page.accounts_requested.connect(
+            lambda: self.switch_page("accounts"))
+        # 那边改了 Java / 内存：启动面板上那行元信息要跟着刷新
+        version_settings_page.saved.connect(self.pages["home"].refresh_panel)
 
         # 主题和语言改到"个性化"页了
         personalize = self.pages["personalize"]
@@ -89,6 +112,7 @@ class MainWindow(QMainWindow):
         # ---------- 初始状态 ----------
         self.sidebar.set_account(self.account_manager.get_current())
         self.pages["home"].set_account(self.account_manager.get_current())
+        self.pages["version_settings"].set_account(self.account_manager.get_current())
         self.switch_page("home")
 
         self.load_styles()
@@ -104,6 +128,38 @@ class MainWindow(QMainWindow):
         # 切到版本页 / 启动页时刷新一下（版本列表和面板上的信息都来自扫描）
         if key in ("versions", "home"):
             page.reload_versions()
+
+    def _on_version_activated(self, version: dict):
+        """版本页里双击（或回车）了一个版本：回启动页
+
+        `switch_page("home")` 会重扫一遍并按 config 里的 last_version 选中 ——
+        而双击那一下已经把 last_version 写好了（versions_page._on_selected），
+        所以这里什么都不用再设，直接切过去，面板上就是刚双击的那个版本。
+        """
+        if not version:
+            return
+        self.switch_page("home")
+
+    def open_version_settings(self, version: dict):
+        """打开某个版本的设置页
+
+        「返回」回到进来的那一页（启动面板和版本页各有一个入口），
+        侧边栏的高亮也留在那一页 —— 这是个子页，不是第四个导航项。
+        """
+        if not version:
+            return
+        page = self.pages["version_settings"]
+        current = self.stack.currentWidget()
+        for key, candidate in self.pages.items():
+            if candidate is current and key != "version_settings":
+                self._settings_return = key
+                break
+        # 首页已经扫过 Java 了，白给它用，省一次全盘扫描
+        page.set_javas(self.pages["home"].javas())
+        page.set_version(version)
+        page.set_tab(0)
+        self.stack.setCurrentWidget(page)
+        self.sidebar.set_active(self._settings_return)
 
     # ---------- 语言 ----------
 
@@ -168,19 +224,19 @@ class MainWindow(QMainWindow):
     def load_styles(self):
         """加载样式表
 
-        两步替换：
+        样式分在 `assets/styles/app.qss` + `assets/styles/parts/*.qss` 里，
+        由 core/resources.py 的 load_stylesheet() 按顺序拼起来（QSS 没有 @import）。
+        然后三步替换：
           1. @ICONS@ → 图标目录的绝对路径（Qt 的 url() 相对路径是按工作目录解析的，
                        打包后工作目录一变就找不到图）
           2. @变量@  → core/theme.py 里对应主题的实际颜色
         最后检查有没有漏网的变量 —— 写错名字的话 Qt 会静默忽略那条规则，
         界面会悄悄少个样式，很难查。
         """
-        path = stylesheet_path()
-        try:
-            qss = path.read_text(encoding="utf-8")
-        except OSError as e:
-            # 不静默吞掉：样式丢了是肉眼可见的问题，至少留条线索
-            print(f"[UI] 样式加载失败: {path} ({e})")
+        qss = load_stylesheet()
+        if not qss.strip():
+            # 一份样式都没读到：这次别把空样式表设进去，不然是"全白"而不是"没样式"
+            print("[UI] 没读到任何样式片段，检查 assets/styles/")
             return
 
         qss = qss.replace("@ICONS@", resource_path("assets", "icons").as_posix())
@@ -217,11 +273,12 @@ class MainWindow(QMainWindow):
                 self._on_accounts_changed()
 
     def _on_accounts_changed(self):
-        """账户列表变了：账户页、侧边栏卡片、首页的档案显示都要跟着更新"""
+        """账户列表变了：账户页、侧边栏卡片、首页和版本设置页都要跟着更新"""
         current = self.account_manager.get_current()
         self.pages["accounts"].reload()
         self.sidebar.set_account(current)
         self.pages["home"].set_account(current)
+        self.pages["version_settings"].set_account(current)
 
     # ---------- 配置 ----------
 
@@ -229,3 +286,5 @@ class MainWindow(QMainWindow):
         """设置页改了游戏目录：所有跟版本相关的页面都要重新扫描"""
         self.pages["home"].reset_scanner()
         self.pages["versions"].reset_scanner()
+        # 版本设置页上"跟随全局设置"的项要立刻反映新的全局值
+        self.pages["version_settings"].refresh_from_global()

@@ -36,10 +36,9 @@ from core.config import config
 from core.i18n import system_locale, tr
 from core.java import find_javas, pick_java, scan_minecraft_dirs
 from core.launch import LaunchRequest, build_launch_plan, load_version, offline_uuid
-from core.version_settings import version_settings
+from core.version_settings import launcher_defaults, version_settings
 from core.versions import VersionScanner
 from ui.dialogs.log_window import LogWindow
-from ui.dialogs.version_settings_dialog import VersionSettingsDialog
 from ui.tasks import LaunchTask, QuickJavaScanTask, RepairTask
 from ui.translatable import TranslatableWidget
 
@@ -106,6 +105,8 @@ class LaunchButton(QFrame):
 class HomePage(TranslatableWidget):
     # 点了「选择版本」—— 请主窗口切到版本页（本页没有列表）
     versions_requested = pyqtSignal()
+    # 点了「版本设置」—— 请主窗口打开版本设置页（以前是弹个对话框）
+    version_settings_requested = pyqtSignal(dict)
 
     def __init__(self, account_manager):
         super().__init__()
@@ -204,14 +205,17 @@ class HomePage(TranslatableWidget):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
-        self.choose_btn = self.button("选择版本")
+        # ⚠️ 两个按钮**平分这一行**，不要 addStretch()：
+        # 面板宽 460，而这两个按钮按文字量算只有 86px 宽 —— 靠左一放，右边空出
+        # 257px、跟上面 414px 宽的启动按钮完全对不齐（用户 2026-09 指出"宽度异常、
+        # 画面上不协调"）。等分之后左右边缘跟启动按钮对齐。
+        self.choose_btn = self.button("选择版本", "PanelButton")
         self.choose_btn.clicked.connect(self.versions_requested.emit)
-        btn_row.addWidget(self.choose_btn)
+        btn_row.addWidget(self.choose_btn, 1)
 
-        self.settings_btn = self.button("版本设置")
+        self.settings_btn = self.button("版本设置", "PanelButton")
         self.settings_btn.clicked.connect(self._open_version_settings)
-        btn_row.addWidget(self.settings_btn)
-        btn_row.addStretch()
+        btn_row.addWidget(self.settings_btn, 1)
         box.addLayout(btn_row)
 
         box.addSpacing(4)
@@ -257,6 +261,10 @@ class HomePage(TranslatableWidget):
             self.version_warn.setText("⚠  " + problem)
             self.version_warn.show()
 
+    def refresh_panel(self):
+        """外面的设置变了以后重贴面板（版本设置页存了盘会调）"""
+        self._update_panel()
+
     def _meta_line(self, version) -> str:
         effective = self._effective(version)
         parts = [self._java_text(version)]
@@ -275,14 +283,14 @@ class HomePage(TranslatableWidget):
     def _effective(self, version) -> dict:
         """这个版本最终生效的启动参数：版本自己的设置 > 启动器默认
 
-        默认值从 config 取（版本设置模块不去读 config，免得环形依赖）。
+        默认值统一由 core/version_settings.launcher_defaults() 给
+        （版本设置页用的是同一个函数，两边不会再各抄一份）。
         """
-        return version_settings.resolve(version["id"], {
-            "java_path": config.get("java_path", ""),
-            "min_memory": int(config.get("min_memory", 512)),
-            "max_memory": int(config.get("max_memory", 2048)),
-            "extra_jvm_args": "",
-        })
+        return version_settings.resolve(version["id"], launcher_defaults())
+
+    def javas(self) -> list:
+        """已经扫到的 Java（版本设置页要用，省得它自己再扫一遍）"""
+        return list(self._javas)
 
     def _java_major(self, version):
         return version["java_major"] or self._merged_java_major(version) or DEFAULT_JAVA_MAJOR
@@ -310,14 +318,14 @@ class HomePage(TranslatableWidget):
         return ""
 
     def _open_version_settings(self):
-        """改这个版本自己的启动设置（Java / 内存 / 额外 JVM 参数）"""
+        """改这个版本自己的启动设置（Java / 内存 / JVM 参数 / 游戏参数）
+
+        以前在这儿弹对话框，现在交给主窗口导航到版本设置页 —— 那页常驻、
+        即时保存，还能顺手放下以后要加的 Mod 列表。
+        """
         if not self._version:
             return
-        dialog = VersionSettingsDialog(self._version, self._javas, self)
-        dialog.exec()
-        if dialog.saved:
-            # 内存、Java 变了，面板上那行元信息要跟着刷新
-            self._update_panel()
+        self.version_settings_requested.emit(self._version)
 
     def _update_banner(self):
         errors = self.scanner.errors
@@ -502,6 +510,10 @@ class HomePage(TranslatableWidget):
             min_memory=effective["min_memory"],
             max_memory=effective["max_memory"],
             extra_jvm_args=effective["extra_jvm_args"],
+            extra_game_args=effective.get("extra_game_args", ""),
+            server_address=effective.get("server_address", ""),
+            # 自定义信息就是 ${version_type}：留空时 resolve 里会退回 JSON 的 type
+            version_type=effective.get("custom_info", ""),
             launcher_name=APP_NAME,
             launcher_version=APP_VERSION,
             # 让游戏首次启动的默认语言跟着系统走

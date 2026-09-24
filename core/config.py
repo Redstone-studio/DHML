@@ -1,4 +1,6 @@
-"""全局配置（%APPDATA%/MCLuncher/config.json）
+"""全局配置（%APPDATA%/Mosslight/config.json）
+
+（2026-09 之前叫 MCLuncher，改名时会把老目录整个改过来，用户不用手动搬。）
 
 注意：这个文件和 core/versions.py 之间存在双向的函数内 import
 （default_minecraft_dir 读 config，Config.get_minecraft_dir 又调
@@ -31,9 +33,9 @@ CONFIG_VERSION = 1
 
 # ---------- 便携模式 ----------
 #
-# 默认配置放 %APPDATA%\MCLuncher（跟系统规矩走，装在 Program Files 里也能写）。
+# 默认配置放 %APPDATA%\Mosslight（跟系统规矩走，装在 Program Files 里也能写）。
 # 想"拷走整个文件夹就带走设置"（绿色版）的话，在**启动器目录**下放一个
-# portable.txt 就行 —— 也可以直接把 MCLuncher 目录拷到启动器旁边，
+# portable.txt 就行 —— 也可以直接把 Mosslight 目录拷到启动器旁边，
 # 那样不用标记文件也会被认出来。
 #
 # 三个必须处理的情况：
@@ -41,20 +43,52 @@ CONFIG_VERSION = 1
 #   2. Program Files 下写不进去 → 探测一次，写不进去就老实退回 %APPDATA%
 #   3. 从 %APPDATA% 切过来的老用户 → 把已有的几个文件**拷**过来（不是移动，也不覆盖）
 PORTABLE_MARKER = "portable.txt"
-DATA_DIR_NAME = "MCLuncher"
+
+# 数据目录名。2026-09 跟着改名从 MCLuncher 换成了 Mosslight（跟 APP_NAME 一致）。
+DATA_DIR_NAME = "Mosslight"
+
+# 改名之前用过的目录名。老用户升级上来时要把数据**接上** ——
+# 光换个名字不管旧目录，用户会以为"账号和设置突然全没了"。
+LEGACY_DIR_NAMES = ("MCLuncher",)
 
 # 切到便携模式时要带过去的文件（就这几个，别的都是临时/缓存）
 _PORTABLE_FILES = ("config.json", "accounts.json", "versions.json")
 
 
+def _adopt_legacy_dir(base: Path, target: Path) -> Path:
+    """把改名前的数据目录改名成新的，返回**这次该用哪个目录**
+
+    只在"新目录还不存在"时才改名 —— 两个目录都存在的话，谁新谁旧猜不出来，
+    宁可让用户自己看一眼，也不能把数据盖掉。
+
+    改不动（被别的进程占着、权限不够）就继续用老目录：
+    **数据能用比目录名好看重要得多**。
+    """
+    if target.exists():
+        return target
+    for name in LEGACY_DIR_NAMES:
+        legacy = base / name
+        if not legacy.is_dir():
+            continue
+        try:
+            os.replace(legacy, target)
+            print(f"[Config] 数据目录改名：{legacy} → {target}")
+            return target
+        except OSError as e:
+            print(f"[Config] 数据目录改不过来（{e}），这次继续用 {legacy}")
+            return legacy
+    return target
+
+
 def _system_config_dir() -> Path:
-    if os.name == "nt":
-        return Path(os.environ.get("APPDATA", Path.home())) / DATA_DIR_NAME
-    return Path.home() / ".config" / DATA_DIR_NAME
+    base = (Path(os.environ.get("APPDATA", Path.home())) if os.name == "nt"
+            else Path.home() / ".config")
+    return _adopt_legacy_dir(base, base / DATA_DIR_NAME)
 
 
 def _portable_dir() -> Path:
-    return app_dir() / DATA_DIR_NAME
+    base = app_dir()
+    return _adopt_legacy_dir(base, base / DATA_DIR_NAME)
 
 
 def _writable(path: Path) -> bool:
@@ -100,7 +134,10 @@ def _migrate_to_portable(target: Path):
 
 
 def get_config_dir() -> Path:
-    """配置目录：便携模式下是启动器旁边的 MCLuncher，否则是 %APPDATA%\\MCLuncher"""
+    """配置目录：便携模式下是启动器旁边的 Mosslight，否则是 %APPDATA%\\Mosslight
+
+    改名前的 MCLuncher 目录会在第一次调用时被**改名**过来（见 _adopt_legacy_dir）。
+    """
     if _portable_requested():
         target = _portable_dir()
         if _writable(target):

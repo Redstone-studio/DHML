@@ -1,0 +1,181 @@
+/* ============================ 提示条 / 徽章 ============================ */
+
+#WarningBanner {
+    background-color: @warn_bg@;
+    border: 1px solid @warn_border@;
+    border-radius: 8px;
+    color: @warn@;
+    padding: 9px 12px;
+    font-size: 12px;
+}
+
+#ErrorBanner {
+    background-color: @danger_bg@;
+    border: 1px solid @danger_border_strong@;
+    border-radius: 8px;
+    color: @danger@;
+    padding: 9px 12px;
+    font-size: 12px;
+}
+
+#Badge {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 6px;
+    color: @text_dim@;
+    padding: 3px 9px;
+    font-size: 12px;
+}
+#BadgeAccent {
+    background-color: @accent_bg@;
+    border: 1px solid @accent_border@;
+    border-radius: 6px;
+    color: @accent_text@;
+    padding: 3px 9px;
+    font-size: 12px;
+}
+#BadgeWarn {
+    background-color: @warn_bg@;
+    border: 1px solid @warn_border@;
+    border-radius: 6px;
+    color: @warn@;
+    padding: 3px 9px;
+    font-size: 12px;
+}
+
+/* ==================== 版本列表（卡片式，参考 PCL2） ====================
+   从 QTableWidget 换过来的原因：表格选中一行时，每个单元格各画各的选中背景，
+   看起来高亮被切成好几段。卡片列表整行连续高亮，还能一行放"名称 + 元信息"。 */
+
+#VersionList {
+    background-color: transparent;
+    border: none;
+    outline: none;
+}
+/* 关键：item 不能留 margin / 圆角断层，否则高亮又会断开 */
+#VersionList::item {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    margin: 2px 0;
+    padding: 0;
+}
+#VersionList::item:hover {
+    background-color: @bg_elevated@;
+}
+#VersionList::item:selected {
+    background-color: @accent_bg@;
+    border-color: @accent_border@;
+}
+
+#VersionGroupTitle {
+    color: @text_faint@;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 14px 0 6px 10px;
+}
+#VersionRowName {
+    color: @text@;
+    font-size: 14px;
+    font-weight: bold;
+}
+#VersionRowMeta {
+    color: @text_faint@;
+    font-size: 12px;
+}
+
+/* 有版本类型图（草方块/圆石/铁砧…）时的方块：透明底，让图自己说话 */
+#BadgeIcon {
+    background-color: transparent;
+    border: none;
+}
+
+#BadgeVanilla {
+    background-color: @accent_bg@;
+    border: 1px solid @accent_border@;
+    border-radius: 10px;
+    color: @accent_text@;
+    font-size: 13px;
+    font-weight: bold;
+}
+#BadgeLoader {
+    background-color: @warn_bg@;
+    border: 1px solid @warn_border@;
+    border-radius: 10px;
+    color: @warn@;
+    font-size: 13px;
+    font-weight: bold;
+}
+#BadgePack {
+    background-color: @pack_bg@;
+    border: 1px solid @pack_border@;
+    border-radius: 10px;
+    color: @pack_text@;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+/* ==================== 账户列表（和版本列表同款卡片行） ==================== */
+
+#AccountList {
+    background-color: transparent;
+    border: none;
+    outline: none;
+}
+#AccountList::item {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    margin: 2px 0;
+    padding: 0;
+}
+/* 账户列表的"选中"用中性灰，绿色专门留给"当前档案"。
+   否则绿色填充（选中）比那根细竖条（当前）显眼得多，
+   会让人误以为选中的那行才是当前档案。
+   （版本页没有"当前"这个概念，所以那边选中有权用绿色。） */
+#AccountList::item:hover {
+    background-color: @bg_elevated@;
+}
+#AccountList::item:selected {
+    background-color: @bg_hover@;
+    border-color: @border_selected@;
+}
+#AccountRowName {
+    color: @text@;
+    font-size: 14px;
+    font-weight: bold;
+}
+/* 当前档案：名字用强调色，配左边那根竖条。
+   不用右侧徽章 —— 徽章飘在行尾离内容很远，看着很散。 */
+#AccountRowNameCurrent {
+    color: @accent@;
+    font-size: 14px;
+    font-weight: bold;
+}
+#AccountRowMeta {
+    color: @text_faint@;
+    font-size: 12px;
+}
+/* 当前档案的左侧竖条。非当前的行也用同样宽度占位（只是透明），
+   这样两种行的文字起始位置能对齐。 */
+#AccountRowAccent {
+    background-color: @accent@;
+    border-radius: 2px;
+}
+#AccountRowAccentOff {
+    background-color: transparent;
+}
+
+/* ==================== 可滚动页面 ====================
+   设置页的内容比窗口高时必须有滚动条，否则卡片会被压扁、底部被切掉。
+   QScrollArea 是 QFrame，会继承全局 QWidget 的底色，这里设成透明，
+   让它露出页面自己的背景。 */
+
+QScrollArea {
+    background-color: transparent;
+    border: none;
+}
+QScrollArea > QWidget > QWidget {
+    background-color: transparent;
+}
+

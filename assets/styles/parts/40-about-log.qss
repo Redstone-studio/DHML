@@ -1,0 +1,111 @@
+/* ==================== 关于页 ==================== */
+
+#AboutName {
+    color: @text_bright@;
+    font-size: 20px;
+    font-weight: bold;
+}
+
+#LicenseName {
+    color: @text@;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+#LicenseText {
+    color: @text_dim@;
+    font-size: 13px;
+}
+
+/* 次要按钮：透明底 + 细边框。"查看来源网站"这类不该抢主操作的注意力 */
+#LinkButton {
+    background-color: transparent;
+    border: 1px solid @border_control@;
+    color: @text_secondary@;
+    padding: 5px 12px;
+}
+#LinkButton:hover {
+    background-color: @bg_elevated@;
+    border-color: @accent@;
+    color: @accent@;
+}
+
+/* ==================== 独立日志窗口 ==================== */
+
+#LogWindow {
+    background-color: @bg_page@;
+}
+/* 级别计数：既是计数也是过滤开关 —— 点一下把那一级藏起来，再点一下放出来。
+   所以它们是 checkable 的 QPushButton，这里把按钮外观压成"文字标签"的样子。 */
+#LogCountFatal, #LogCountError, #LogCountWarn, #LogCountInfo, #LogCountDebug {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 2px 8px;
+}
+#LogCountFatal:hover, #LogCountError:hover, #LogCountWarn:hover,
+#LogCountInfo:hover, #LogCountDebug:hover {
+    background-color: @bg_elevated@;
+    border-color: @border_control@;
+}
+#LogCountFatal {
+    color: @danger@;
+    font-weight: bold;
+}
+#LogCountError {
+    color: @danger@;
+}
+#LogCountWarn {
+    color: @warn@;
+}
+#LogCountInfo {
+    color: @text_faint@;
+}
+#LogCountDebug {
+    color: @text_disabled@;
+}
+/* 点掉的级别（按钮弹起）：压暗表示"这一级现在不显示" */
+#LogCountFatal:!checked, #LogCountError:!checked, #LogCountWarn:!checked,
+#LogCountInfo:!checked, #LogCountDebug:!checked {
+    color: @text_disabled@;
+    font-weight: normal;
+}
+
+/* ==================== 游戏日志 ==================== */
+
+/* 日志窗口的日志正文。每一行的级别颜色由 QTextCharFormat 决定，不在这里 ——
+   QSS 只能给整个控件一个颜色，管不到单独几行。 */
+#GameLog {
+    background-color: @bg_window@;
+    border: 1px solid @border@;
+    border-radius: 8px;
+    color: @text_dim@;
+    font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+    font-size: 12px;
+    padding: 6px;
+}
+
+/* 首页那条"最近发生了什么"。日志本体已经搬去独立窗口了 */
+#StatusText {
+    color: @text_secondary@;
+    font-size: 13px;
+}
+
+/* 当前档案卡片右边的小箭头 —— 侧边栏已经没有「账户」入口了，
+   这个卡片是唯一入口，得让它看起来能点 */
+#AccountChipChevron {
+    color: @text_faint@;
+    font-size: 18px;
+    font-weight: bold;
+}
+#AccountChip:hover #AccountChipChevron {
+    color: @accent@;
+}
+/* 头像（MC 皮肤的脸）。图片自己已经裁过圆角了（见 ui/avatar.py），
+   这里只管"没有皮肤时"的兜底底色，圆角半径跟图片保持一致才不会露出方角 */
+#AccountAvatar, #AccountRowAvatar {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 9px;
+}
+

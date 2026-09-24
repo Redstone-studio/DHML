@@ -1,0 +1,63 @@
+/* ==================== 版本设置页（整页，不是弹窗） ==================== */
+/*
+   这一页是从「版本」页 / 启动面板导航进来的子页，所以：
+   - 顶部两个 tab 用"选中项加下划线"的写法，而不是另一种按钮底色 ——
+     它表示"同一件事的两个面"，不是两个动作
+   - 卡片、字段名、说明文字全部复用 #Card / #FieldLabel / #HintText，
+     免得又多一套长得差不多的样式
+*/
+
+#TabButton {
+    background-color: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    padding: 8px 14px 6px 14px;
+    color: @text_faint@;
+    font-size: 14px;
+}
+#TabButton:hover {
+    background-color: transparent;
+    color: @text_bright@;
+}
+#TabButton:checked {
+    color: @accent@;
+    border-bottom: 2px solid @accent@;
+    font-weight: bold;
+}
+
+/* 启动面板上那排次要按钮（选择版本 / 版本设置）。
+   它们跟上面 414px 宽的启动按钮等分同一行，所以比普通按钮高一点、也粗一点，
+   不然"一条细线"贴在绿色大按钮下面会显得很弱 */
+#PanelButton {
+    padding: 10px 16px;
+    font-size: 13px;
+}
+
+/* 「高级选项」的折叠标题：看着像小标题，其实是个按钮 */
+#SectionToggle {
+    background-color: transparent;
+    border: none;
+    padding: 4px 0;
+    color: @text@;
+    font-size: 14px;
+    font-weight: bold;
+    text-align: left;
+}
+#SectionToggle:hover {
+    background-color: transparent;
+    color: @accent@;
+}
+
+/* 卡片里的一条细分隔线（Mod 提示卡、tab 下面那条） */
+#CardSep {
+    background-color: @border@;
+    border: none;
+}
+
+/* 「该版本不可使用 Mod」那种提示卡的标题 */
+#NoticeTitle {
+    color: @accent@;
+    font-size: 17px;
+    font-weight: bold;
+}

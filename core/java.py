@@ -21,11 +21,13 @@
    只扫一层的话会漏。
 """
 
+import json
 import os
 import platform
 import re
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +36,24 @@ from core.i18n import tr
 
 # java -version 超时（秒）。JDK 冷启动偶尔要一两秒
 VERSION_TIMEOUT = 5
+
+# 扫描结果的缓存文件（放配置目录里）。改缓存结构时 +1，旧的自然作废。
+CACHE_VERSION = 2
+CACHE_FILE_NAME = "java_cache.json"
+
+# 探测失败的路径多久之内不再重试（秒）。
+#
+# 为什么连失败也要缓存：这台机器上有两个 Oracle 的 shim
+# （`Common Files\Oracle\Java\javapath\java.exe`）要跑 **4.9 秒**才返回一个
+# 解析不出的结果 —— 光它们俩就让"每次启动"多等 5 秒。
+# 缓存失败之后，第一次仍然慢，之后就是毫秒级；而真要是临时故障
+# （文件被占用之类），过几个小时还会再试一次，不会永久拉黑。
+FAILURE_RETRY_SECONDS = 6 * 3600
+
+# 缓存里那条"上次没读出来"在界面上怎么显示。
+# ⚠️ 这句**不进缓存**（缓存只存"失败过"这个事实和时间戳）—— 存了的话
+# 用户换语言以后会看到一句旧语言的错误提示。
+FAILED_CACHE_MESSAGE = "上次扫描没读出它的版本，暂时跳过"
 
 # 常见安装位置。列表末尾会再往下一层找（Oracle 的 latest 软链）
 COMMON_DIRS = (
@@ -82,6 +102,27 @@ class JavaInfo:
     @property
     def is_64bit(self) -> bool:
         return self.arch == "x86_64"
+
+    # ---------- 存缓存用 ----------
+    #
+    # 读一次版本要起一个 java 进程（这台机器上 12 个候选要 5 秒多），
+    # 所以扫到的结果按"exe 的 mtime + 大小"存起来，下次直接复用。
+    # 存的是**原始数据**，不存 error —— 因为 error 文案是翻译过的，
+    # 存进文件以后再换语言就变成另一种语言的旧句子了。
+
+    def to_dict(self) -> dict:
+        return {"version": self.version, "major": self.major,
+                "vendor": self.vendor, "arch": self.arch}
+
+    @classmethod
+    def from_dict(cls, path: str, data: dict) -> "JavaInfo":
+        return cls(
+            path=path,
+            version=str(data.get("version", "")),
+            major=int(data.get("major", 0) or 0),
+            vendor=str(data.get("vendor", "")),
+            arch=str(data.get("arch", "")),
+        )
 
     def label(self) -> str:
         """界面上显示的一行，例如 `JDK 17 · 64 位 · Oracle`"""
@@ -306,23 +347,123 @@ def candidate_paths(mc_dirs=()) -> list:
 # 对外接口
 # ============================================================
 
-def find_javas(mc_dirs=(), max_workers: int = 8, on_progress=None) -> list:
+def _cache_path():
+    """Java 扫描结果的缓存文件（放配置目录里，跟 config.json 作伴）"""
+    from core.config import get_config_dir      # 函数内 import：避免顶层环形依赖
+    return get_config_dir() / CACHE_FILE_NAME
+
+
+def _fingerprint(java_exe) -> list:
+    """判断"还是不是同一个 java.exe"的依据：mtime + 大小
+
+    ⚠️ 不能只看路径：同一个路径上重装了别的 Java 是完全正常的
+    （卸载 8 装 17），只看路径会把旧版本号一直用下去。
+    """
+    st = os.stat(java_exe)
+    return [st.st_mtime, st.st_size]
+
+
+def _within_retry_window(entry: dict) -> bool:
+    """这条失败记录还在"先别再试"的窗口里吗
+
+    时间戳读不出来（手改坏了 / 老格式）就当不在窗口里 —— 宁可多探一次，
+    也别让某个 Java 永远不出现在列表里。
+    """
+    try:
+        failed_at = float(entry.get("failed_at", 0))
+    except (TypeError, ValueError):
+        return False
+    return (time.time() - failed_at) < FAILURE_RETRY_SECONDS
+
+
+def _load_cache() -> dict:
+    """读缓存。读不出来就当没有 —— 缓存坏了最多是慢一次，不该让扫描失败"""
+    try:
+        raw = json.loads(_cache_path().read_bytes())
+    except (OSError, ValueError):
+        return {}
+    entries = raw.get("entries") if isinstance(raw, dict) else None
+    if not isinstance(entries, dict) or raw.get("cache_version") != CACHE_VERSION:
+        return {}
+    return entries
+
+
+def _save_cache(entries: dict) -> None:
+    """原子写缓存。写不进去只打日志 —— 缓存是纯加速，不能因为它失败影响启动"""
+    path = _cache_path()
+    payload = {"cache_version": CACHE_VERSION, "entries": entries}
+    tmp = path.parent / (path.name + ".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except OSError as e:
+        print(f"[Java] 扫描缓存写不进去（{e}），下次还得重扫")
+
+
+def find_javas(mc_dirs=(), max_workers: int = 8, on_progress=None,
+               use_cache: bool = True) -> list:
     """扫描所有 Java 并读出版本信息，按主版本从高到低排
 
-    读版本要起进程，所以并发跑 —— 串行的话 8 个 Java 要等好几秒。
+    读版本要起进程（这台机器上 12 个候选要 5 秒多），所以：
+
+    1. **并发跑**（串行的话 8 个 Java 要等十几秒）
+    2. 结果按 exe 的 mtime + 大小存进缓存，下次启动直接复用 ——
+       只有"新出现的 / 换过的" java.exe 才需要重新探测。
+       （实测：第二次启动这一段从 5.2 秒降到几毫秒。）
+
+    关掉缓存传 use_cache=False（测试和"重新扫描"按钮会用到）。
     """
     paths = candidate_paths(mc_dirs)
     if on_progress:
         on_progress(tr("正在检测 {n} 个候选…", n=len(paths)))
 
-    results = []
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = [pool.submit(read_java_info, p) for p in paths]
-        for future in as_completed(futures):
+    cached = _load_cache() if use_cache else {}
+    results, fresh, todo = [], {}, []
+    for path in paths:
+        key = str(path)
+        entry = cached.get(key)
+        if isinstance(entry, dict) and entry.get("fp"):
             try:
-                results.append(future.result())
-            except Exception as e:                      # 兜底：单个失败不影响整体
-                results.append(JavaInfo(path="", error=f"{type(e).__name__}: {e}"))
+                same = entry["fp"] == _fingerprint(path)
+            except OSError:
+                same = False        # stat 失败（刚被删/挪走）→ 当没缓存
+            if same and entry.get("ok"):
+                results.append(JavaInfo.from_dict(key, entry.get("info") or {}))
+                fresh[key] = entry
+                continue
+            # 上次探测失败：在重试窗口内不再花几秒去碰它
+            if same and _within_retry_window(entry):
+                results.append(JavaInfo(path=key, error=tr(FAILED_CACHE_MESSAGE)))
+                fresh[key] = entry
+                continue
+        todo.append(path)
+
+    if todo:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(read_java_info, p): p for p in todo}
+            for future in as_completed(futures):
+                path = futures[future]
+                try:
+                    info = future.result()
+                except Exception as e:                  # 兜底：单个失败不影响整体
+                    info = JavaInfo(path=str(path), error=f"{type(e).__name__}: {e}")
+                results.append(info)
+                try:
+                    fp = _fingerprint(path)
+                except OSError:
+                    continue        # 连文件都 stat 不到，没什么可记的
+                if info.usable:
+                    fresh[str(path)] = {"ok": True, "fp": fp, "info": info.to_dict()}
+                else:
+                    fresh[str(path)] = {"ok": False, "fp": fp,
+                                        "failed_at": time.time()}
+
+    if use_cache:
+        _save_cache(fresh)
 
     results.sort(key=lambda j: (-j.major, j.path))
     return results
