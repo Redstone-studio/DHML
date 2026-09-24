@@ -28,7 +28,6 @@ from core.repair import missing_libraries
 from core.resources import app_dir
 from core.versions import default_minecraft_dir
 from core.versions import type_label as version_type_label
-from ui.dialogs.version_settings_dialog import VersionSettingsDialog
 from ui.tasks import RepairTask
 from ui.translatable import TranslatableWidget
 from ui.widgets.version_list import VersionList
@@ -50,6 +49,10 @@ class VersionsPage(TranslatableWidget):
     config_changed = pyqtSignal()
     # 选中的版本变了 —— 启动页的面板跟着走
     version_selected = pyqtSignal(object)
+    # 双击 / 回车了一个版本 —— 主窗口据此切回启动页
+    version_activated = pyqtSignal(object)
+    # 点了「版本设置」—— 主窗口导航到版本设置页
+    version_settings_requested = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()
@@ -80,7 +83,11 @@ class VersionsPage(TranslatableWidget):
 
         self.version_list = VersionList()
         self.version_list.selection_changed.connect(self._on_selected)
+        # 双击 / 回车一个版本 = 选中它 + 回启动页（用户 2026-09 要求）
+        self.version_list.activated.connect(self._on_activated)
         list_box.addWidget(self.version_list)
+        # 双击这个动作没有任何视觉提示，写在列表下面明说一句
+        list_box.addWidget(self.label("双击一个版本可以直接回到启动页。", "HintText"))
         body.addWidget(list_card, 1)
 
         body.addWidget(self._make_detail_card())
@@ -271,6 +278,20 @@ class VersionsPage(TranslatableWidget):
 
         return card
 
+    def _on_activated(self, version):
+        """双击 / 回车了一个版本：确保它被选中，然后请主窗口切回启动页
+
+        "当前版本"本来就跟着选中走（`selection_changed` → 启动页的面板），
+        所以这里不用再自己去 set_version，只要把"回启动页"发出去。
+
+        保险起见先显式选一次：`itemActivated` 不保证之前一定走过一遍选中
+        （比如用键盘上下移动后按回车，中间那次选中是走过的，但别指望）。
+        """
+        if not version:
+            return
+        self.version_list.select_id(version["id"])
+        self.version_activated.emit(version)
+
     def _on_selected(self, version):
         self._version = version
         self._merged = None
@@ -350,14 +371,13 @@ class VersionsPage(TranslatableWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
     def _open_settings(self):
-        """改这个版本自己的启动设置（Java / 内存 / 额外 JVM 参数）"""
+        """改这个版本自己的启动设置（Java / 内存 / JVM 参数 / 游戏参数）
+
+        以前弹对话框，现在导航到版本设置页（见 main_window 的接线）。
+        """
         if not self._version:
             return
-        # 这个页面没有 Java 扫描结果，对话框会自己扫一遍
-        dialog = VersionSettingsDialog(self._version, parent=self)
-        dialog.exec()
-        if dialog.saved:
-            self._on_selected(self._version)
+        self.version_settings_requested.emit(self._version)
 
     def _start_repair(self):
         if not self._version or not self._merged or not self._missing:

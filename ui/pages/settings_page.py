@@ -21,7 +21,10 @@ from PyQt6.QtWidgets import (
 from core.config import PORTABLE_MARKER, config, get_config_dir, is_portable
 from core.java import scan_minecraft_dirs
 from core.i18n import tr
-from core.memory import jvm_overhead_mb, recommend_memory, system_memory
+from core.memory import (
+    MEMORY_MAX, MEMORY_MIN, MEMORY_STEP, jvm_overhead_mb, recommend_memory,
+    snap_memory, system_memory
+)
 from ui.dialogs.about_dialog import AboutDialog
 from ui.tasks import QuickJavaScanTask
 from ui.widgets.memory_bar import MemoryBar
@@ -29,10 +32,8 @@ from ui.widgets.switch import Switch
 from ui.translatable import TranslatableWidget
 
 
-# 内存滑块的档位（MB）。512 的倍数最省事：拖出来的值不会出现 3586 这种数
-MEMORY_STEP = 512
-MEMORY_MIN = 512
-MEMORY_MAX = 65536
+# 内存滑块的档位常量搬到了 core/memory.py（版本设置页也要用同一套档位，
+# 两处各写一份迟早会不一致）
 
 
 def _gb(megabytes: int) -> str:
@@ -195,7 +196,7 @@ class SettingsPage(TranslatableWidget):
             return
         self.java_rescan_btn.setEnabled(False)
         self.java_rescan_btn.setText(tr("扫描中…"))
-        self._java_scan = QuickJavaScanTask(scan_minecraft_dirs(), self)
+        self._java_scan = QuickJavaScanTask(scan_minecraft_dirs(), self, use_cache=False)
         self._java_scan.done.connect(self._on_java_scan_done)
         self._java_scan.start()
 
@@ -294,9 +295,8 @@ class SettingsPage(TranslatableWidget):
 
     @staticmethod
     def _snap_memory(value: int) -> int:
-        """取整到 512 的档位 —— 滑块拖出来的值不会是整数档"""
-        stepped = int(round(value / MEMORY_STEP)) * MEMORY_STEP
-        return max(MEMORY_MIN, stepped)
+        """（转发到 core.memory.snap_memory，留个名字给老代码/测试用）"""
+        return snap_memory(value)
 
     def _refresh_memory_bar(self):
         info = system_memory()

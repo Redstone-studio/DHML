@@ -157,21 +157,27 @@ class LaunchTask(QThread):
 class QuickJavaScanTask(QThread):
     """后台扫 Java
 
-    扫一遍要起好几个 `java -version` 进程，主线程里做会卡一两秒。
+    扫一遍要起好几个 `java -version` 进程（这台机器上 12 个候选要 5 秒多），
+    主线程里做会直接卡住界面，所以放线程里 —— 而且 find_javas 有缓存，
+    **启动时那次**基本都是直接命中缓存、几毫秒就回来。
+
+    用户点「重新扫描」时要传 use_cache=False：那个按钮的意思就是"别信旧的"。
     """
 
     done = pyqtSignal(list)         # list[JavaInfo]
     progress = pyqtSignal(str)
 
-    def __init__(self, mc_dirs=(), parent=None):
+    def __init__(self, mc_dirs=(), parent=None, use_cache: bool = True):
         super().__init__(parent)
         self.mc_dirs = list(mc_dirs)
+        self.use_cache = use_cache
 
     def run(self):
         from core.java import find_javas, scan_minecraft_dirs
         mc_dirs = self.mc_dirs or scan_minecraft_dirs()
         try:
-            result = find_javas(mc_dirs, on_progress=self.progress.emit)
+            result = find_javas(mc_dirs, on_progress=self.progress.emit,
+                                use_cache=self.use_cache)
         except Exception as e:
             self.progress.emit(tr("扫描 Java 出错：{err}", err=e))
             result = []
