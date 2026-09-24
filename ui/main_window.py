@@ -6,10 +6,11 @@ from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 
 from core import i18n, theme
 from core.accounts import AccountManager
-from core.app_info import APP_NAME
+from core.app_info import APP_DISPLAY_NAME
 from core.config import config
 from core.resources import resource_path, stylesheet_path
 from ui.dialogs.new_account_dialog import NewAccountDialog
+from ui.icons import app_icon
 from ui.pages.accounts_page import AccountsPage
 from ui.pages.home_page import HomePage
 from ui.pages.personalize_page import PersonalizePage
@@ -21,7 +22,10 @@ from ui.widgets.sidebar import Sidebar
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(APP_NAME)
+        # 窗口标题用**完整名**：Windows 的任务栏、Alt+Tab 显示的就是它，
+        # 界面上自己叫的名字（侧边栏左上角）短一点，是 APP_NAME
+        self.setWindowTitle(APP_DISPLAY_NAME)
+        self.setWindowIcon(app_icon())
         self.resize(1280, 820)
         self.setMinimumSize(1040, 620)
 

@@ -187,7 +187,7 @@ class AboutContent(TranslatableWidget):
         # 提取工具靠"字面量是否直接出现在 tr() 调用里"判断，
         # 套一层变量它就会当成"没走文案系统"报出来（功能上没问题，但会一直告警）。
         box.addWidget(self._bullet(tr("没有统计、没有遥测、没有崩溃上报。作者不会知道你在用它。")))
-        box.addWidget(self._bullet(tr("你的档案信息（包括离线 UUID）只写在本机 %APPDATA%/MCLuncher/ 下。")))
+        box.addWidget(self._bullet(tr("你的档案信息（包括离线 UUID）只写在本机的配置目录里，不会上传。设置页底部写着它的具体位置。")))
         box.addWidget(self._bullet(tr("启动器不会在后台联网；只有你主动操作（比如以后做版本下载）时才会访问网络。")))
         box.addWidget(self._bullet(tr("以后做正版登录时，只有登录那一步会直连微软服务器，启动器本身不做中转。")))
 

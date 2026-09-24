@@ -22,7 +22,8 @@ from PyQt6.QtWidgets import (
 
 from core.accounts import type_label
 from core.i18n import tr
-from ui.icons import ACCOUNT_TYPE_ICONS, icon
+from ui.avatar import account_avatar
+from ui.icons import ACCOUNT_TYPE_ICONS, icon, screen_dpr
 from ui.translatable import TranslatableWidget
 
 ROW_HEIGHT = 62
@@ -47,12 +48,18 @@ class _AccountRow(QWidget):
         accent.setFixedWidth(4)
         layout.addWidget(accent)
 
+        # 头像用 Minecraft 皮肤的脸（见 ui/avatar.py）。抠不出来就退回账户类型图标
         avatar = QLabel()
-        avatar.setFixedSize(30, 30)
+        avatar.setFixedSize(32, 32)
         avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        avatar.setPixmap(
-            icon(ACCOUNT_TYPE_ICONS.get(account.get("type"), "offline")).pixmap(QSize(20, 20))
-        )
+        avatar.setObjectName("AccountRowAvatar")
+        face = account_avatar(account, 32, screen_dpr(avatar))
+        if face is not None:
+            avatar.setPixmap(face)
+        else:
+            avatar.setPixmap(
+                icon(ACCOUNT_TYPE_ICONS.get(account.get("type"), "offline")).pixmap(QSize(20, 20))
+            )
         layout.addWidget(avatar)
 
         text_box = QVBoxLayout()
