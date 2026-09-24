@@ -46,9 +46,42 @@ def resource_path(*parts: str) -> Path:
     return root.joinpath(*parts)
 
 
-def stylesheet_path() -> Path:
-    """主题模板的位置
+def stylesheet_paths() -> "list[Path]":
+    """要加载的全部样式片段，**按加载顺序**
 
-    这个文件里颜色全是 @变量@，由 core/theme.py 在加载时替换。
+    Qt 的 QSS **没有 @import**（写 `@import "x.qss";` 只会被当成一条无效规则），
+    所以"拆成多个文件"唯一的做法就是：读进来、按顺序拼成一个字符串、
+    再交给 setStyleSheet()。
+
+    顺序 = `app.qss`（文件头说明 + 侧边栏 + 页面通用）→ `parts/*.qss` 按文件名排序。
+    **后面的规则覆盖前面的**，所以 parts 前面的数字是有意义的：
+    10 按钮 → 20 输入控件 → 30 徽章 → 40 关于/日志 → 50 内存条 → 60 对话框
+    → 70 版本设置页。新加片段按这个规律取名字就行。
+
+    找不到 parts 目录也能跑（只有 app.qss），不会因为少一个文件就整份样式失效。
     """
-    return resource_path("assets", "styles", "app.qss")
+    base = resource_path("assets", "styles")
+    paths = [base / "app.qss"]
+    parts_dir = base / "parts"
+    if parts_dir.is_dir():
+        paths.extend(sorted(p for p in parts_dir.glob("*.qss") if p.is_file()))
+    return [p for p in paths if p.is_file()]
+
+
+def load_stylesheet() -> str:
+    """把所有样式片段拼成一份 QSS
+
+    拼的时候给每段加一行出处注释 —— Qt 的样式报错只给行号，不带文件名，
+    出了"某条规则没生效"的时候这行注释是唯一能定位到文件的线索。
+    注释对 QSS 解析没有影响。
+    """
+    chunks = []
+    for path in stylesheet_paths():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as e:
+            # 不静默吞掉：少一段样式是肉眼可见的
+            print(f"[UI] 样式片段读不了: {path} ({e})")
+            continue
+        chunks.append(f"/* ======== {path.name} ======== */\n{text}")
+    return "\n".join(chunks)

@@ -34,17 +34,29 @@ SETTINGS_FILE = get_config_dir() / "versions.json"
 # 配置格式版本（跟 core/config.py 一个意思，以后改结构时 +1）
 SETTINGS_VERSION = 1
 
-# 一个版本能覆盖哪些项。加新项只改这一处：对话框和保存都按这个表走。
+# 一个版本能覆盖哪些项。加新项只改这一处：页面和保存都按这个表走。
 #
 # 注意这里**没有**窗口尺寸之类 —— 那些还没有"启动器默认值"，
 # 一个只有版本覆盖、没有全局默认的项，界面上的"跟随默认"就没意义了。
-FIELDS = ("java_path", "min_memory", "max_memory", "extra_jvm_args")
+#
+# extra_game_args / custom_info / server_address 是"只有版本、没有全局默认"的项：
+# 它们的"跟随默认"就是把键删掉（= 行为跟没设置过一样）。
+FIELDS = ("java_path", "min_memory", "max_memory", "extra_jvm_args",
+          "extra_game_args", "custom_info", "server_address", "icon")
 
 _COERCE = {
     "java_path": as_str,
     "min_memory": as_int,
     "max_memory": as_int,
     "extra_jvm_args": as_str,
+    # 游戏参数：追加在版本 JSON 自带的游戏参数后面（图 3 的"游戏参数"）
+    "extra_game_args": as_str,
+    # 自定义信息：替换 ${version_type}（游戏里 F3 显示的版本类型）
+    "custom_info": as_str,
+    # 自动进入服务器："ip" 或 "ip:port"
+    "server_address": as_str,
+    # 这个版本在列表里用哪张图（配置目录 icons/<文件名>，见 ui/icons.custom_icon_path）
+    "icon": as_str,
 }
 
 
@@ -165,3 +177,24 @@ class VersionSettings:
 
 # 全局单例（跟 core/config.py 的 config 一样，各处直接用）
 version_settings = VersionSettings()
+
+
+def launcher_defaults() -> dict:
+    """启动器级别的默认值（= 界面上"跟随全局设置"跟的那个东西）
+
+    放在这里是为了**只有一个地方**知道"默认值从哪来"：以前这段是抄在
+    ui/pages/home_page.py 的 _effective() 里的，版本设置页要用就得再抄一份，
+    两份迟早不一致。
+
+    config 用**函数内 import**：这个模块是被 config 的下游（ui）读的，
+    顶层就互相 import 容易在以后加东西时绕成环。
+    """
+    from core.config import config
+
+    return {
+        "java_path": config.get("java_path", ""),
+        "min_memory": int(config.get("min_memory", 512)),
+        "max_memory": int(config.get("max_memory", 2048)),
+        # 启动器没有"全局 JVM 参数"这一项，所以默认就是空
+        "extra_jvm_args": "",
+    }

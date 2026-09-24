@@ -1,0 +1,47 @@
+/* ==================== 内存滑块 ==================== */
+/* 滑块是设置页的主角（拖比点小箭头快得多），原生样式太细，容易被当成装饰线 */
+#MemorySlider::groove:horizontal {
+    height: 8px;
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 4px;
+}
+/* 已选中的那一段（滑块左边）用强调色，一眼看出"配了多少" */
+#MemorySlider::sub-page:horizontal {
+    background-color: @accent_fill@;
+    border-radius: 4px;
+}
+#MemorySlider::add-page:horizontal {
+    background-color: transparent;
+}
+#MemorySlider::handle:horizontal {
+    width: 16px;
+    margin: -5px 0;
+    border: 2px solid @accent@;
+    border-radius: 9px;
+    background-color: @text_bright@;
+}
+#MemorySlider::handle:horizontal:hover {
+    background-color: @accent@;
+}
+#MemorySlider::handle:horizontal:pressed {
+    background-color: @accent_fill_pressed@;
+}
+
+/* 运行中的「停止游戏」按钮。平时是绿色 LaunchButton，跑起来换成红色 */
+#StopButton {
+    background-color: @danger@;
+    border: 1px solid @danger_hover@;
+    border-radius: 10px;
+    color: @on_accent@;
+    font-size: 16px;
+    font-weight: bold;
+}
+#StopButton:hover {
+    background-color: @danger_hover@;
+}
+#StopButton:disabled {
+    background-color: @danger_bg@;
+    color: @text_disabled@;
+}
+

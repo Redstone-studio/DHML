@@ -1,0 +1,111 @@
+/* ============================ 按钮 ============================ */
+
+QPushButton {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 8px;
+    padding: 7px 16px;
+    color: @text_secondary@;
+    font-size: 13px;
+}
+QPushButton:hover {
+    background-color: @bg_hover@;
+    border-color: @border_hover@;
+    color: @text_bright@;
+}
+QPushButton:pressed {
+    background-color: @bg_pressed@;
+}
+QPushButton:disabled {
+    background-color: @bg_card@;
+    border-color: @border_disabled@;
+    color: @text_disabled@;
+}
+
+/* 主操作按钮（绿色） */
+#PrimaryButton {
+    background-color: @accent_fill@;
+    border: 1px solid @accent_fill_hover@;
+    color: @on_accent@;
+    font-weight: bold;
+}
+#PrimaryButton:hover {
+    background-color: @accent_fill_hover@;
+    border-color: @accent@;
+}
+#PrimaryButton:pressed {
+    background-color: @accent_fill_pressed@;
+}
+#PrimaryButton:disabled {
+    background-color: @accent_bg_disabled@;
+    border-color: @accent_border_disabled@;
+    color: @accent_text_disabled@;
+}
+
+/* 危险操作（删除） */
+#DangerButton {
+    background-color: transparent;
+    border: 1px solid @danger_border@;
+    color: @danger@;
+}
+#DangerButton:hover {
+    background-color: @danger_bg_hover@;
+    border-color: @danger@;
+    color: @danger_hover@;
+}
+#DangerButton:disabled {
+    border-color: @border_disabled@;
+    color: @text_disabled@;
+}
+
+/* 无边框的图标按钮 */
+#IconButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 0;
+    color: @text_dim@;
+    font-size: 16px;
+}
+#IconButton:hover {
+    background-color: @bg_control@;
+    color: @accent@;
+}
+#IconButton:pressed {
+    background-color: @bg_card@;
+}
+
+/* 首页的启动按钮 */
+#LaunchButton {
+    background-color: @accent_fill@;
+    border: none;
+    border-radius: 10px;
+    color: @on_accent@;
+    font-size: 16px;
+    font-weight: bold;
+}
+#LaunchButton:hover {
+    background-color: @accent_fill_hover@;
+}
+#LaunchButton:pressed {
+    background-color: @accent_fill_pressed@;
+}
+#LaunchButton:disabled {
+    background-color: @bg_elevated@;
+    color: @text_disabled@;
+}
+
+/* 启动按钮是"两行"的：主文案一行，版本号一行（自己拼的 QFrame，见 home_page.py）。
+   两个 QLabel 得自己声明颜色 —— QFrame 上的 color 不会遗传给它们。 */
+#LaunchTitle {
+    background-color: transparent;
+    color: @on_accent@;
+    font-size: 17px;
+    font-weight: bold;
+}
+#LaunchSubtitle {
+    background-color: transparent;
+    color: @on_accent@;
+    font-size: 11px;
+}
+

@@ -70,33 +70,31 @@
 4. **别指望把小图放大**。平滑放大会糊；最近邻只在"源图是像素画且整数倍"时才有意义。
    58×58 够用是因为目标只有 48 物理像素。
 
-## 用户自定义图标（功能预留，界面还没做）
+## 用户自定义图标（界面还没做）
 
-数据侧已经通了：`versions.json` 里那个版本写一个 `icon` 字段就行，
-`ui/icons.py` 的 `custom_icon_path()` 会按这个顺序找：
+`versions.json` 里那个版本写一个 `icon` 字段，`ui/icons.py` 的
+`custom_icon_path()` 就去**配置目录**的 `icons/` 里找：
 
-1. **内置调色板** `assets/icons/version/custom/<icon>.png` —— 用户从我们给的图里挑
-2. **配置目录** `icons/<icon>` —— 用户放自己的图
-   （配置目录就是设置页底部写的那个；便携模式下在启动器旁边）
+```
+<配置目录>/icons/diamond.png        写 "diamond" 或 "diamond.png" 都认
+```
 
-只接受**文件名，不接受路径**（`../evil.png` 这种会被拒），
-免得一个配置项能指到别处去。
+配置目录就是设置页底部写的那个；便携模式下就是启动器旁边的 `Mosslight/icons/`。
+只接受**文件名，不接受路径**（`../evil.png` 这种会被拒），免得一个配置项能指到别处去。
 
-### 调色板里现在有哪些（64 张）
+`icon` 在 `core/version_settings.py` 的 `FIELDS` 里，所以它能正常落盘
+（以前没在里面，写进去会被 `_normalize()` 悄悄丢掉 —— 那时"数据侧已经通了"是句空话）。
 
-- **宝石/材料**：diamond、emerald、redstone、lapis_lazuli、amethyst_shard、echo_shard、
-  iron_ingot、gold_ingot、netherite_ingot、copper_ingot、gold_block、redstone_block
-- **稀有物**：ender_pearl、nether_star、dragon_egg、heart_of_the_sea、nautilus_shell、
-  totem_of_undying、elytra、trident、shield、turtle_helmet、mace、egg
-- **功能方块**：beacon、conduit、chest、ender_chest、crafting_table、furnace、
-  blast_furnace、smithing_table、loom、anvil、bookshelf、grass_path、
-  redstone_lamp_on、redstone_lamp_off
-- **地形**：grass_block、cobblestone、stone、oak_log、oak_planks、obsidian、
-  crying_obsidian、bedrock、spawner、barrier、command_block、structure_block
-- **小玩意**：golden_apple、enchanted_book、experience_bottle、slime_ball、honeycomb、
-  snowball、compass、clock、spyglass、brush、goat_horn、name_tag、firework_rocket、map
+### ⚠️ 曾经有一份 64 张的内置调色板，2026-09 删了
 
-读列表用 `ui/icons.py` 的 `palette_icons()`（以后做选择界面直接用）。
+原来这里是 `assets/icons/version/custom/`：64 张 256×256 的物品图（446 KB），
+打算做"从我们给的图里挑一个"的选择界面。后来发现：
+
+- 没有任何界面能用上它（`palette_icons()` 一个调用者都没有）
+- 列表里只画 44 px，256×256 的源图纯属浪费（缩到 64 更清楚，也更小）
+
+所以整批删了，现在只剩"用户放自己的图"这一条路。要恢复"内置可选图标"的话，
+**记得先把图缩到 64×64**，并在 `core/version_settings.py` 的 FIELDS 里确认 `icon` 还在。
 
 ## 程序图标（另一回事）
 

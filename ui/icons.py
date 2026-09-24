@@ -78,9 +78,6 @@ def app_icon() -> QIcon:
 
 VERSION_ICON_DIR = ("assets", "icons", "version")
 
-# 给"用户自定义图标"预留的内置调色板（界面还没做，查找逻辑先通了）
-VERSION_CUSTOM_DIR = ("assets", "icons", "version", "custom")
-
 # 加载器 → 图标名。**顺序有意义**，具体的一定要排在泛化的前面：
 #   neoforge   里含 "forge"
 #   optifabric 里含 "fabric"
@@ -117,23 +114,21 @@ def version_icon_name(version: dict) -> str:
     return _TYPE_ICONS.get(version.get("type", ""), "")
 
 
-def palette_icons() -> "list[str]":
-    """内置调色板里所有可选图标的名字（以后"自定义图标"界面用它列表）"""
-    try:
-        folder = resource_path(*VERSION_CUSTOM_DIR)
-        return sorted(p.stem for p in folder.glob("*.png"))
-    except OSError:
-        return []
-
-
 def custom_icon_path(version: dict):
     """用户给这个版本挑的图标；没挑 / 找不到就返回 None
 
-    **功能预留**（界面还没做）：数据侧已经通了 —— 只要 `versions.json` 里那个版本
-    写了 `icon` 字段，这里就会去这两处找：
+    去**配置目录**的 `icons/` 里找（配置目录见设置页底部；便携模式下就是
+    启动器旁边的 `Mosslight/icons/`）：
 
-      1. 内置调色板 `assets/icons/version/custom/<icon>.png` —— 挑的是我们给的图
-      2. 配置目录 `icons/<icon>`                                —— 挑的是用户自己的图
+        <配置目录>/icons/diamond.png      写 "diamond" 或 "diamond.png" 都认
+
+    ⚠️ **界面还没做**：想换某个版本的图标，得自己把 png 丢进那个目录、
+    再把 `versions.json` 里那个版本写上 `"icon": "diamond.png"`。
+    （`icon` 已经在 `core/version_settings.py` 的 FIELDS 里了，不会被丢掉。）
+
+    以前这里还有一条"内置调色板"分支（`assets/icons/version/custom/`，
+    64 张 256×256 的图）。那批图没有任何界面能用上、白占 446 KB，
+    2026-09 删掉了，所以现在只剩"用户自己的图"这一条。
 
     只接受**文件名，不接受路径** —— 别让一个配置项能指到 `..\\..` 去。
     """
@@ -142,12 +137,11 @@ def custom_icon_path(version: dict):
     if not name or Path(name).name != name:
         return None
 
-    builtin = Path(resource_path(*VERSION_CUSTOM_DIR, f"{Path(name).stem}.png"))
-    if builtin.is_file():
-        return builtin
-
-    mine = get_config_dir() / "icons" / name
-    return mine if mine.is_file() else None
+    folder = get_config_dir() / "icons"
+    for candidate in (folder / name, folder / f"{Path(name).stem}.png"):
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def screen_dpr(widget=None) -> float:

@@ -1,0 +1,276 @@
+/* ============================ 输入控件 ============================ */
+
+QLineEdit {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 8px;
+    padding: 7px 10px;
+    color: @text@;
+    selection-background-color: @select_bg@;
+    selection-color: @on_accent@;
+}
+QLineEdit:hover {
+    border-color: @border_hover@;
+}
+QLineEdit:focus {
+    border-color: @accent@;
+}
+QLineEdit:disabled {
+    background-color: @bg_disabled@;
+    color: @text_faint@;
+    border-color: @border_disabled@;
+}
+
+/* ---- 数字框：上下箭头用真图标 ---- */
+QSpinBox {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 8px;
+    padding: 6px 6px 6px 10px;
+    color: @text@;
+    min-width: 96px;
+    selection-background-color: @select_bg@;
+}
+QSpinBox:hover {
+    border-color: @border_hover@;
+}
+QSpinBox:focus {
+    border-color: @accent@;
+}
+QSpinBox:disabled {
+    background-color: @bg_disabled@;
+    color: @text_faint@;
+    border-color: @border_disabled@;
+}
+QSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 22px;
+    margin: 2px 3px 0 0;
+    border: none;
+    background: transparent;
+}
+QSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 22px;
+    margin: 0 3px 2px 0;
+    border: none;
+    background: transparent;
+}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background-color: @border_control@;
+    border-radius: 4px;
+}
+QSpinBox::up-arrow {
+    image: url(@ICONS@/chevron-up.svg);
+    width: 11px;
+    height: 11px;
+}
+QSpinBox::down-arrow {
+    image: url(@ICONS@/chevron-down.svg);
+    width: 11px;
+    height: 11px;
+}
+
+/* ---- 下拉框 ---- */
+QComboBox {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 8px;
+    padding: 7px 10px;
+    color: @text@;
+    min-height: 20px;
+}
+QComboBox:hover {
+    border-color: @border_hover@;
+}
+QComboBox:focus {
+    border-color: @accent@;
+}
+QComboBox:disabled {
+    background-color: @bg_disabled@;
+    color: @text_faint@;
+    border-color: @border_disabled@;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 30px;
+    border: none;
+    background: transparent;
+}
+QComboBox::down-arrow {
+    image: url(@ICONS@/chevron-down.svg);
+    width: 12px;
+    height: 12px;
+}
+QComboBox QAbstractItemView {
+    background-color: @bg_elevated@;
+    border: 1px solid @border_control@;
+    border-radius: 8px;
+    padding: 4px;
+    color: @text@;
+    outline: none;
+    selection-background-color: @accent_selected_bg@;
+    selection-color: @accent_text_strong@;
+}
+QComboBox QAbstractItemView::item {
+    padding: 6px 8px;
+    border-radius: 6px;
+    min-height: 22px;
+}
+QComboBox QAbstractItemView::separator {
+    height: 1px;
+    background-color: @border_control@;
+    margin: 4px 6px;
+}
+
+/* ---- 勾选框 / 单选框：统一成 PCL2 那种打勾样式 ---- */
+QCheckBox {
+    color: @text_secondary@;
+    spacing: 9px;
+    padding: 3px;
+}
+QCheckBox:hover {
+    color: @text_bright@;
+}
+
+QCheckBox::indicator,
+QRadioButton::indicator {
+    width: 17px;
+    height: 17px;
+    border-radius: 4px;
+    border: 1px solid @border_hover@;
+    background-color: @bg_check@;
+}
+QCheckBox::indicator:hover,
+QRadioButton::indicator:hover {
+    border-color: @accent@;
+}
+QCheckBox::indicator:checked,
+QRadioButton::indicator:checked {
+    background-color: @accent_fill@;
+    border-color: @accent@;
+    image: url(@ICONS@/check.svg);
+}
+QCheckBox::indicator:disabled,
+QRadioButton::indicator:disabled {
+    border-color: @border_disabled@;
+    background-color: @bg_disabled@;
+}
+
+QRadioButton {
+    color: @text_secondary@;
+    spacing: 9px;
+    padding: 9px 11px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+}
+QRadioButton:hover {
+    background-color: @bg_elevated@;
+}
+QRadioButton:checked {
+    background-color: @accent_bg@;
+    border-color: @accent_border@;
+    color: @accent_text_strong@;
+    font-weight: bold;
+}
+QRadioButton:disabled {
+    color: @text_disabled@;
+}
+
+/* ============================ 列表 / 表格 ============================ */
+
+QListWidget {
+    background-color: transparent;
+    border: none;
+    outline: none;
+    color: @text_secondary@;
+}
+QListWidget::item {
+    padding: 9px 10px;
+    border-radius: 8px;
+    margin-bottom: 2px;
+}
+QListWidget::item:hover {
+    background-color: @bg_elevated@;
+}
+QListWidget::item:selected {
+    background-color: @bg_elevated@;
+    color: @accent@;
+}
+
+QTableWidget {
+    background-color: transparent;
+    border: none;
+    gridline-color: transparent;
+    outline: none;
+    color: @text_secondary@;
+    selection-background-color: @bg_elevated@;
+    selection-color: @accent@;
+}
+QTableWidget::item {
+    padding: 7px 8px;
+    border: none;
+}
+QTableWidget::item:hover {
+    background-color: @bg_card@;
+}
+QTableWidget::item:selected {
+    background-color: @bg_elevated@;
+    color: @accent@;
+}
+
+QHeaderView::section {
+    background-color: transparent;
+    color: @text_faint@;
+    border: none;
+    border-bottom: 1px solid @border@;
+    padding: 8px;
+    font-size: 12px;
+    font-weight: bold;
+}
+QTableCornerButton::section {
+    background-color: transparent;
+    border: none;
+}
+
+/* ============================ 滚动条 ============================ */
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 2px;
+}
+QScrollBar::handle:vertical {
+    background-color: @border_control@;
+    border-radius: 5px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover {
+    background-color: @border_hover@;
+}
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 2px;
+}
+QScrollBar::handle:horizontal {
+    background-color: @border_control@;
+    border-radius: 5px;
+    min-width: 30px;
+}
+QScrollBar::handle:horizontal:hover {
+    background-color: @border_hover@;
+}
+QScrollBar::add-line, QScrollBar::sub-line {
+    height: 0;
+    width: 0;
+    background: none;
+    border: none;
+}
+QScrollBar::add-page, QScrollBar::sub-page {
+    background: none;
+}
+

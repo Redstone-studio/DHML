@@ -21,6 +21,21 @@ MODDED_RANGE = (4096, 12288)
 # 超过物理内存的这个比例就画一条红线 —— 再往上容易开始换页，表现是越玩越卡
 PAGE_RISK_RATIO = 0.6
 
+# 内存滑块的档位（MB）。512 的倍数最省事：拖出来的值不会出现 3586 这种数
+MEMORY_STEP = 512
+MEMORY_MIN = 512
+MEMORY_MAX = 65536
+
+
+def snap_memory(value: int) -> int:
+    """取整到 512 的档位 —— 滑块拖出来的值不会是整数档
+
+    界面上所有能改内存的地方都要过这一道（设置页、版本设置页），
+    不然配置里会出现用户没想选的数字。
+    """
+    stepped = int(round(int(value) / MEMORY_STEP)) * MEMORY_STEP
+    return max(MEMORY_MIN, stepped)
+
 
 @dataclass
 class MemoryInfo:

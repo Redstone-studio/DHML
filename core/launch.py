@@ -301,6 +301,10 @@ class LaunchRequest:
     version_type: str = ""         # 留空则用 JSON 里的 type
     # 这个版本额外要加的 JVM 参数（版本设置里填的，见 core/version_settings.py）
     extra_jvm_args: str = ""
+    # 额外要加的游戏参数（版本设置里的"游戏参数"，追加在 JSON 自带参数后面）
+    extra_game_args: str = ""
+    # 自动进入服务器："ip" 或 "ip:port"。空 = 不自动进服
+    server_address: str = ""
 
 
 @dataclass
@@ -323,6 +327,26 @@ class LaunchPlan:
 
 def _version_dir(mc_dir: Path, version_id: str) -> Path:
     return mc_dir / "versions" / version_id
+
+
+# QuickPlay（--quickPlayMultiplayer）是 1.20 引入的。按发布时间判断而不是按
+# 版本号：1.20 的正式版发布日是 2023-06-07，往前留一点余量给快照
+# （发布日之前的快照也可能已经带上了）。这跟 PCL 的判断方式一致。
+_QUICK_PLAY_SINCE = "2023-05-04"
+
+
+def _supports_quick_play(release_time: str) -> bool:
+    """这个版本该用 QuickPlay 还是老的 --server/--port
+
+    releaseTime 是 ISO8601（"2023-06-07T12:00:00+00:00"），前 10 位就是日期，
+    字典序比较即可。读不出来（老版本 JSON 没这个字段）就当作不支持。
+    """
+    value = str(release_time)[:10]
+    # 先确认它真的像个日期：乱填的字符串按字典序会排到 "2023-…" 后面
+    # （'u' > '2'），那样会给出错的选择
+    if len(value) != 10 or value[4] != "-" or value[7] != "-":
+        return False
+    return value >= _QUICK_PLAY_SINCE
 
 
 def _split_args(text: str) -> list:
@@ -537,6 +561,21 @@ def build_launch_plan(req: LaunchRequest, version: dict = None) -> LaunchPlan:
     elif vj.get("minecraftArguments"):
         # 老格式：一整个字符串
         game_args.extend(_split_args(resolve(vj["minecraftArguments"])))
+
+    # 版本设置里追加的游戏参数。放**最后**：MC 的选项解析对同一个选项
+    # 取后面的值，所以用户填的 --width/--height 能盖掉 JSON 里那份。
+    if req.extra_game_args:
+        game_args.extend(_split_args(req.extra_game_args))
+
+    # 自动进入服务器
+    server = (req.server_address or "").strip()
+    if server:
+        if _supports_quick_play(vj.get("releaseTime", "")):
+            # 1.20 起 --server/--port 没了，改走 QuickPlay
+            game_args.extend(["--quickPlayMultiplayer", server])
+        else:
+            host, _, port = server.partition(":")
+            game_args.extend(["--server", host, "--port", port or "25565"])
 
     # ---------- log4j 配置（有就用，没有不影响启动）----------
     logging_cfg = (vj.get("logging") or {}).get("client") or {}
