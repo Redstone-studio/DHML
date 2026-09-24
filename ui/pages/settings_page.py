@@ -12,10 +12,10 @@
 3. Java 那行 placeholder 写了"（暂未实现）"、右边又挂一个标签，一句话说了两遍。
 """
 
-from PyQt6.QtCore import QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget
+    QPushButton, QScrollArea, QSlider, QSpinBox, QVBoxLayout, QWidget
 )
 
 from core.config import PORTABLE_MARKER, config, get_config_dir, is_portable
@@ -27,6 +27,12 @@ from ui.tasks import QuickJavaScanTask
 from ui.widgets.memory_bar import MemoryBar
 from ui.widgets.switch import Switch
 from ui.translatable import TranslatableWidget
+
+
+# 内存滑块的档位（MB）。512 的倍数最省事：拖出来的值不会出现 3586 这种数
+MEMORY_STEP = 512
+MEMORY_MIN = 512
+MEMORY_MAX = 65536
 
 
 def _gb(megabytes: int) -> str:
@@ -71,9 +77,13 @@ class SettingsPage(TranslatableWidget):
         layout.setSpacing(8)
 
         layout.addWidget(self.label("设置", "PageTitle"))
-        layout.addWidget(self.label(
-            "改动会立即生效并写入 %APPDATA%/MCLuncher/config.json", "PageSubtitle"
-        ))
+        # 写死路径是不对的：开了便携模式以后配置就不在 %APPDATA% 了。
+        # 文案里带路径 → 动态生成（retranslate() 里会重贴）
+        self.subtitle = QLabel()
+        self.subtitle.setObjectName("PageSubtitle")
+        self.subtitle.setWordWrap(True)
+        layout.addWidget(self.subtitle)
+        self._refresh_subtitle()
 
         layout.addSpacing(14)
 
@@ -98,6 +108,11 @@ class SettingsPage(TranslatableWidget):
         # 内存那条的说明和推荐值按钮里都带数字，是生成的
         self._refresh_memory_bar()
         self._refresh_config_hint()
+        self._refresh_subtitle()
+
+    def _refresh_subtitle(self):
+        self.subtitle.setText(
+            tr("改动会立即生效并写入 {path}", path=get_config_dir() / "config.json"))
 
     # ---------- 卡片工厂 ----------
 
@@ -224,15 +239,7 @@ class SettingsPage(TranslatableWidget):
         self.min_mem.valueChanged.connect(self._on_min_memory_changed)
         row.addWidget(self.min_mem)
 
-        row.addSpacing(18)
-        row.addWidget(self.label("最大", "FieldLabel"))
-        self.max_mem = QSpinBox()
-        self.max_mem.setRange(512, 65536)
-        self.max_mem.setSingleStep(512)
-        self.max_mem.setSuffix(" MB")
-        self.max_mem.setValue(int(config.get("max_memory", 2048)))
-        self.max_mem.valueChanged.connect(self._on_max_memory_changed)
-        row.addWidget(self.max_mem)
+        row.addStretch()
 
         # 文字里带数字，所以不用 self.button() 绑定（那个只认固定文案），
         # 由 _refresh_memory_bar() 负责设置
@@ -240,8 +247,42 @@ class SettingsPage(TranslatableWidget):
         self.recommend_btn.clicked.connect(self._apply_recommended_memory)
         row.addWidget(self.recommend_btn)
 
-        row.addStretch()
         box.addLayout(row)
+        box.addSpacing(4)
+
+        # ---------- 最大内存：滑块 ----------
+        # 用滑块而不是数字框：拖比点小箭头快得多，而且整条的长度本身就是
+        # "物理内存有多大"的直观提示（滑块拉到底 = 全部内存，配到一半以上就过了红线）。
+        info = system_memory()
+        upper = min(MEMORY_MAX, max(4096, info.total_mb)) if info.ok else MEMORY_MAX
+        upper = (upper // MEMORY_STEP) * MEMORY_STEP
+
+        slider_row = QHBoxLayout()
+        slider_row.setSpacing(10)
+        slider_row.addWidget(self.label("最大", "FieldLabel"))
+
+        self.max_mem = QSlider(Qt.Orientation.Horizontal)
+        self.max_mem.setObjectName("MemorySlider")
+        self.max_mem.setRange(MEMORY_MIN, upper)
+        self.max_mem.setSingleStep(MEMORY_STEP)
+        self.max_mem.setPageStep(MEMORY_STEP * 4)
+        self.max_mem.setTickInterval(MEMORY_STEP * 8)
+        self.max_mem.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.max_mem.setValue(int(config.get("max_memory", 2048)))
+        # ⚠️ 先 setValue 再 connect：不然初始化那一下会被当成"用户拖了"，
+        # 于是去夹最小堆、还会写一次配置
+        self.max_mem.valueChanged.connect(self._on_max_memory_changed)
+        slider_row.addWidget(self.max_mem, 1)
+
+        # 数字单独一个标签（不是数字框）：固定宽度，拖的时候不会把布局推来推去
+        self.max_value = QLabel(f"{self.max_mem.value()} MB")
+        self.max_value.setObjectName("FieldLabel")
+        self.max_value.setFixedWidth(90)
+        self.max_value.setAlignment(Qt.AlignmentFlag.AlignRight
+                                    | Qt.AlignmentFlag.AlignVCenter)
+        slider_row.addWidget(self.max_value)
+
+        box.addLayout(slider_row)
 
         box.addWidget(self.label("最小堆不能大于最大堆 —— 两边会自动联动。", "HintText"))
         box.addWidget(self.label(
@@ -250,6 +291,12 @@ class SettingsPage(TranslatableWidget):
 
         self._refresh_memory_bar()
         return card
+
+    @staticmethod
+    def _snap_memory(value: int) -> int:
+        """取整到 512 的档位 —— 滑块拖出来的值不会是整数档"""
+        stepped = int(round(value / MEMORY_STEP)) * MEMORY_STEP
+        return max(MEMORY_MIN, stepped)
 
     def _refresh_memory_bar(self):
         info = system_memory()
@@ -278,8 +325,9 @@ class SettingsPage(TranslatableWidget):
             return
         value = recommend_memory(info.total_mb)
         # 最小跟着走一半，别让 min 卡住 max（联动逻辑在 _on_*_changed 里）
-        self.min_mem.setValue(min(value, max(512, value // 2)))
+        self.min_mem.setValue(min(value, max(MEMORY_MIN, value // 2)))
         self.max_mem.setValue(value)
+        self.max_value.setText(f"{self.max_mem.value()} MB")
         self._refresh_memory_bar()
 
     def _on_min_memory_changed(self, value: int):
@@ -290,16 +338,28 @@ class SettingsPage(TranslatableWidget):
             self.max_mem.blockSignals(True)
             self.max_mem.setValue(value)
             self.max_mem.blockSignals(False)
+            self.max_value.setText(f"{value} MB")
         self._refresh_memory_bar()
         self._save_timer.start()
 
     def _on_max_memory_changed(self, value: int):
         if self._loading:
             return
+
+        # 滑块拖出来的值不是整数档，先吸附 —— 不吸附的话配置里会出现 3586 这种数，
+        # 而滑块本身又画不出那么细的差别
+        snapped = self._snap_memory(value)
+        if snapped != value:
+            self.max_mem.blockSignals(True)
+            self.max_mem.setValue(snapped)
+            self.max_mem.blockSignals(False)
+            value = snapped
+
         if value < self.min_mem.value():
             self.min_mem.blockSignals(True)
             self.min_mem.setValue(value)
             self.min_mem.blockSignals(False)
+        self.max_value.setText(f"{value} MB")
         self._refresh_memory_bar()
         self._save_timer.start()
 

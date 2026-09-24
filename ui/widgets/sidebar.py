@@ -9,12 +9,15 @@
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 )
 
 from core.accounts import type_label
 from core.app_info import APP_NAME, APP_VERSION
+from ui.avatar import account_avatar
+from ui.icons import screen_dpr
 from core.i18n import tr
 from ui.translatable import TranslatableWidget
 
@@ -52,20 +55,37 @@ class _AccountChip(QFrame):
         text_box.addWidget(self.type_label)
         layout.addLayout(text_box, 1)
 
+        # 侧边栏里已经没有「账户」这一项了（桌面版 2026-09 去掉），
+        # 所以这个卡片就是**唯一入口**，得让它一眼看得出能点：一个小箭头
+        self.chevron = QLabel("\u203a")
+        self.chevron.setObjectName("AccountChipChevron")
+        self.chevron.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.chevron)
+
         self.set_account(None)
 
     def set_account(self, account):
         """记住当前档案 —— 语言切换时要靠它重建这两行文字"""
         self._account = account
         if not account:
+            self.avatar.setPixmap(QPixmap())
             self.avatar.setText("?")
             self.name_label.setText(tr("未选择档案"))
             self.type_label.setText(tr("点此新建"))
+            self.chevron.setToolTip(tr("管理档案"))
             return
         name = str(account.get("name", "?"))
-        self.avatar.setText(name[:1].upper())
+        pixmap = account_avatar(account, 32, screen_dpr(self))
+        if pixmap is not None:
+            self.avatar.setText("")
+            self.avatar.setPixmap(pixmap)
+        else:
+            # 皮肤文件读不出来就退回首字母，别显示成空白
+            self.avatar.setPixmap(QPixmap())
+            self.avatar.setText(name[:1].upper())
         self.name_label.setText(name)
         self.type_label.setText(type_label(account.get("type")))
+        self.chevron.setToolTip(tr("管理档案"))
 
     def retranslate(self):
         self.set_account(self._account)
@@ -89,10 +109,12 @@ class Sidebar(TranslatableWidget):
     # 页面本身还在，switch_page("versions") 照样能用。
     NAV_ITEMS = (
         ("home", "\u25b6", "启动"),
-        ("accounts", "\u25c9", "账户"),
         ("personalize", "\u25d0", "个性化"),
         ("settings", "\u2699", "设置"),
     )  # noqa: i18n  —— 这些中文在 _apply_nav_texts 里过 tr()
+
+    # 「账户」不在导航里（2026-09 去掉）：底部那张当前档案卡片就是入口，
+    # 点它跳账户页 —— 跟「版本」同一个道理，一件事不留两个门。
 
     def __init__(self):
         super().__init__()

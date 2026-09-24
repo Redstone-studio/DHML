@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
 from core.i18n import tr
 from core.versions import VersionScanner
 from core.versions import type_label as version_type_label
-from ui.icons import version_pixmap
+from ui.icons import screen_dpr, version_pixmap
 from ui.translatable import TranslatableWidget
 
 # (kind, 分组标题的源文案)
@@ -36,10 +36,14 @@ GROUPS = (
 
 KIND_FILTERS = (("all", "全部"),) + GROUPS  # noqa: i18n
 
-ROW_HEIGHT = 62
+# 行高。配合下面那个 44 的方块 —— 图标大了，行也得跟着高一点
+ROW_HEIGHT = 68
 
-# 左边那个方块的边长（有图标时图比它小一圈，留点呼吸）
-BADGE_SIZE = 38
+# 左边那个方块的边长。**44 是调过的**：这些物品图是精细的三维渲染，
+# 缩到 32 显示会明显发软（试过，用户反馈"有点模糊"）。
+# 显示尺寸变大自然就清楚了 —— 源图是 256×256，分辨率一直够用，
+# 不够的是"画多大"。
+BADGE_SIZE = 44
 
 _BADGE_NAMES = {
     "vanilla": "BadgeVanilla",
@@ -70,7 +74,7 @@ class _VersionRow(QWidget):
         badge = QLabel()
         badge.setFixedSize(BADGE_SIZE, BADGE_SIZE)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pixmap = version_pixmap(version, BADGE_SIZE - 6)
+        pixmap = version_pixmap(version, BADGE_SIZE - 6, screen_dpr(self))
         if pixmap is not None:
             # 有版本类型图（草方块 / 圆石 / 铁砧 / …）就用图；用的是透明底，
             # 所以 objectName 换成 BadgeIcon，别套那个彩色圆角方块

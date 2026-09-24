@@ -344,7 +344,7 @@ class LogWindow(QWidget):
         """导出的是**全部**日志，不管当前藏了哪几级 ——
         发问题报告时漏掉被藏起来的 DEBUG，往往就查不出来了"""
         path, _ = QFileDialog.getSaveFileName(
-            self, tr("导出日志"), "MCLuncher-log.txt", "Text (*.txt);;All (*)"
+            self, tr("导出日志"), "Mosslight-log.txt", "Text (*.txt);;All (*)"
         )
         if not path:
             return

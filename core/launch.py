@@ -28,11 +28,12 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.app_info import APP_NAME as DEFAULT_LAUNCHER_NAME
+from core.app_info import APP_VERSION as DEFAULT_LAUNCHER_VERSION
 from core.i18n import tr
 
-# 启动器自己的信息（会显示在游戏窗口标题和 F3 里）
-DEFAULT_LAUNCHER_NAME = "MC Launcher"
-DEFAULT_LAUNCHER_VERSION = "0.0.0"
+# 上面两个名字/版本号跟随 core/app_info.py，不再各写一份字符串。
+# 真实调用方（首页）会把自己的值传进来，这两个只是兜底。
 
 # features：Minecraft 用这套开关决定哪些参数要加。
 # has_custom_resolution 必须是 True —— 我们总是传 --width/--height。

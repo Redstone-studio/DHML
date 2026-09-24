@@ -21,6 +21,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from core.app_info import APP_VERSION
 from core.i18n import tr
 from core.launch import maven_to_path, rules_allow
 
@@ -28,7 +29,10 @@ from core.launch import maven_to_path, rules_allow
 MIRROR_PREFIX = "https://bmclapi2.bangbang93.com/maven"
 
 TIMEOUT = 30
-USER_AGENT = "MCLuncher/0.2 (+https://github.com/Redstone-studio/DHML)"
+# 下载镜像那边看到的名字。用完整名（带 Launcher），跟窗口标题一致；
+# 版本号从 app_info 取，别在这儿再抄一份（抄了就一定会忘）
+USER_AGENT = (f"MosslightLauncher/{APP_VERSION.lstrip('v')} "
+              "(+https://github.com/Redstone-studio/DHML)")
 
 
 def _mirror_url(url: str) -> str:
