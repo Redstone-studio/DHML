@@ -1,5 +1,5 @@
 /* ============================================================================
-   MC Launcher 界面样式（模板）
+   Mosslight 界面样式（模板）
 
    这里的颜色**不是硬编码**，而是 @变量@ —— 由 core/theme.py 在加载时替换：
 
@@ -823,6 +823,54 @@ QScrollArea > QWidget > QWidget {
 #StatusText {
     color: @text_secondary@;
     font-size: 13px;
+}
+
+/* 当前档案卡片右边的小箭头 —— 侧边栏已经没有「账户」入口了，
+   这个卡片是唯一入口，得让它看起来能点 */
+#AccountChipChevron {
+    color: @text_faint@;
+    font-size: 18px;
+    font-weight: bold;
+}
+#AccountChip:hover #AccountChipChevron {
+    color: @accent@;
+}
+/* 头像（MC 皮肤的脸）。图片自己已经裁过圆角了（见 ui/avatar.py），
+   这里只管"没有皮肤时"的兜底底色，圆角半径跟图片保持一致才不会露出方角 */
+#AccountAvatar, #AccountRowAvatar {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 9px;
+}
+
+/* ==================== 内存滑块 ==================== */
+/* 滑块是设置页的主角（拖比点小箭头快得多），原生样式太细，容易被当成装饰线 */
+#MemorySlider::groove:horizontal {
+    height: 8px;
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 4px;
+}
+/* 已选中的那一段（滑块左边）用强调色，一眼看出"配了多少" */
+#MemorySlider::sub-page:horizontal {
+    background-color: @accent_fill@;
+    border-radius: 4px;
+}
+#MemorySlider::add-page:horizontal {
+    background-color: transparent;
+}
+#MemorySlider::handle:horizontal {
+    width: 16px;
+    margin: -5px 0;
+    border: 2px solid @accent@;
+    border-radius: 9px;
+    background-color: @text_bright@;
+}
+#MemorySlider::handle:horizontal:hover {
+    background-color: @accent@;
+}
+#MemorySlider::handle:horizontal:pressed {
+    background-color: @accent_fill_pressed@;
 }
 
 /* 运行中的「停止游戏」按钮。平时是绿色 LaunchButton，跑起来换成红色 */
