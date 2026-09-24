@@ -13,7 +13,7 @@
 
 ---
 
-## 未发布
+## v0.5.6-alpha
 
 - **改名了**：界面里叫 **Mosslight**（侧边栏左上角、关于页），Windows 那边看到的完整名是
   **Mosslight Launcher**（窗口标题、任务栏、Alt+Tab）。构建产物跟着变成
