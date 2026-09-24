@@ -20,7 +20,9 @@ class AboutDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("AboutDialog")
         self.setWindowTitle(tr("关于本软件"))
-        self.resize(640, 640)
+        # 640 宽时说明文字折得太碎，几乎一屏只能看一段；加宽到 760，
+        # 中英日俄四种语言里最长的俄文也不用来回滚
+        self.resize(760, 640)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 12)

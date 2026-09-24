@@ -188,6 +188,17 @@ def scan_common_dirs() -> list:
                     exe = sub / "bin" / exe_name
                     if exe.exists():
                         result.append(str(exe))
+                # 再深一层：Program Files\Java\latest\jre-1.8\bin\java.exe
+                try:
+                    for inner in sub.iterdir():
+                        if not inner.is_dir():
+                            continue
+                        for exe_name in ("java.exe", "javaw.exe"):
+                            exe = inner / "bin" / exe_name
+                            if exe.exists():
+                                result.append(str(exe))
+                except (PermissionError, OSError):
+                    pass
         except Exception:
             continue
     
@@ -208,7 +219,12 @@ def scan_path_env() -> list:
 
 
 def scan_minecraft_runtime() -> list:
-    """扫描 Minecraft 官方启动器下载的 Java runtime"""
+    """扫描 Minecraft 官方 / PCL 下载的 Java runtime
+
+    ⚠️ 目录结构有两种，之前只处理了嵌套那种，所以一个都搜不到：
+      扁平  runtime/<component>/bin/java.exe                         ← 官方和 PCL 都是这个
+      嵌套  runtime/<component>/<os-arch>/<component>/bin/java.exe   ← 老版官方启动器
+    """
     result = []
     if sys.platform == "win32":
         base = Path(os.environ.get("APPDATA", Path.home())) / ".minecraft" / "runtime"
@@ -224,18 +240,19 @@ def scan_minecraft_runtime() -> list:
         for component in base.iterdir():
             if not component.is_dir():
                 continue
-            # 结构: runtime/<component>/<os-arch>/<component>/bin/java.exe
+            # 扁平结构（实测：官方启动器和 PCL 都是这种）
+            flat = component / "bin" / "java.exe"
+            if flat.is_file():
+                result.append(str(flat))
+                continue
+            # 嵌套结构（老版官方启动器用过，保险起见留着）
             try:
                 for os_arch in component.iterdir():
                     if not os_arch.is_dir():
                         continue
-                    for inner in os_arch.iterdir():
-                        if not inner.is_dir():
-                            continue
-                        for exe_name in ("java.exe", "javaw.exe"):
-                            exe = inner / "bin" / exe_name
-                            if exe.exists():
-                                result.append(str(exe))
+                    nested = os_arch / component.name / "bin" / "java.exe"
+                    if nested.is_file():
+                        result.append(str(nested))
             except Exception:
                 continue
     except Exception:

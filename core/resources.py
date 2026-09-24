@@ -21,6 +21,20 @@ def project_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def app_dir() -> Path:
+    """**启动器自己**的目录（便携模式要往这里放数据）
+
+    ⚠️ 不能像 resource_path 那样用 `__file__`：打包后 PyInstaller 把东西放进
+    `_internal/`，`__file__` 指的是那里，而用户眼里的"启动器目录"是 **exe 旁边**。
+    所以打包后要用 `sys.executable` 的父目录。
+
+    源码运行时就是项目根 —— 开发时数据落在仓库里，正好方便看。
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return project_root()
+
+
 def resource_path(*parts: str) -> Path:
     """定位随程序一起分发的资源
 
