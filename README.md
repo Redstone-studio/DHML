@@ -1,4 +1,5 @@
-# DHML
+# Mosslight Launcher
+
 
 PyQt6 写的 Minecraft 启动器。自己用的，顺手开源。
 
