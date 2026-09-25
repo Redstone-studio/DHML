@@ -179,3 +179,253 @@ QScrollArea > QWidget > QWidget {
     background-color: transparent;
 }
 
+
+/* 游戏目录列表里的一行：名字正常大小，**路径用更小的字**（路径很长，
+   跟名字一样大会把名字压下去）。结构见 versions_page._make_dir_row() */
+#DirRowName {
+    color: @text@;
+    font-size: 13px;
+    font-weight: bold;
+}
+#DirRowPath {
+    color: @text_faint@;
+    font-size: 11px;
+}
+/* 游戏目录列表里那一行的容器。⚠️ 它盖在 item 的选中底色上面，
+   背景必须透明，不然选中高亮会被这层糊掉（只剩文字没有高亮）。
+   QListWidget::setItemWidget 挂上去的控件都容易踩这个。 */
+#DirRow, #DirRow QLabel {
+    background-color: transparent;
+}
+/* 下载页左侧的分组标题（版本 / 社区资源 / 安装包）。
+   ⚠️ 字号必须写在 QSS 里：全局 `QWidget { font-size: 14px }` 会盖掉
+   代码里 setFont() 设的值，所以标题大不大完全由这条决定（ID 选择器优先级更高）。
+   背景要透明——它是 setItemWidget 挂上去的，不透明会盖住 item 自己的底色。 */
+#DownloadNavGroup {
+    background-color: transparent;
+    color: @text_dim@;
+    font-size: 17px;
+    font-weight: bold;
+}
+/* 折叠组（下载页第一页的「正式版 103」、安装选项页的「Forge 3」都用它）。
+   ⚠️ 字号必须写在这儿（QSS 字号优先于代码 setFont）。
+   ⚠️ **标题栏是有框的、展开出来的行是扁平的**（用户 2026-09 明确要求）：
+   标题做成卡片（跟 `#ModCard` / `#ModVersionCard` 一个观感，一致），
+   组内的版本行**不再各自套一个框** —— 一行一个框的话，
+   以后做"展开时逐行滑入"的动画会很别扭（每个框都在自己动），
+   而且真正要点的目标是那一行，不是框。
+   ⚠️ #CollapsibleBody / #RemoteVersionRow 的底色必须透明：
+   不透明会盖住卡片底色，而且扁平行看着像"没对齐的框"。 */
+#CollapsibleHeader {
+    background-color: @bg_card@;
+    border: 1px solid @border@;
+    border-radius: 8px;
+    padding: 11px 14px;
+    text-align: left;
+    color: @text@;
+    font-size: 15px;
+    font-weight: bold;
+}
+#CollapsibleHeader:hover {
+    background-color: @bg_elevated@;
+    border-color: @accent@;
+}
+/* ⚠️ 框里那个按钮只是"可点区域"，**不要它自己的边框/底色**：
+   框和悬停效果由外面的 #CollapsibleHeader 负责。
+   （选择器写 `#CollapsibleHeader QPushButton` 是为了压过 10-buttons.qss
+   里 `QPushButton` 的基础样式 —— 单写 `#CollapsibleHeaderButton` 的话
+   按钮还是会有自己的底和边框。） */
+#CollapsibleHeader QPushButton {
+    background-color: transparent;
+    border: none;
+    padding: 0;
+    text-align: left;
+    color: @text@;
+    font-size: 15px;
+    font-weight: bold;
+}
+#CollapsibleHeader QPushButton:hover {
+    color: @accent@;
+}
+/* 标题右边的副标题（"最新版 0.19.5（共 253 个）"那种）。
+   比标题小、比标题淡 —— 它是补充信息，不该跟标题抢注意力。 */
+#CollapsibleHeaderNote {
+    background-color: transparent;
+    color: @text_faint@;
+    font-size: 12px;
+    font-weight: normal;
+}
+/* 锁着的组（加载器互斥：现在装的是别家）。
+   ⚠️ 底色压暗，但**悬停仍然给反馈** —— 点它 = 改选这一家（不是点不动），
+   完全没反馈的话用户根本不会去点。
+   ⚠️ 悬停只改描边、不改底色：底色一变亮就像"已经是选中的那个"了。 */
+#CollapsibleHeader[locked="true"] {
+    background-color: @bg_disabled@;
+    border-color: @border_disabled@;
+}
+#CollapsibleHeader[locked="true"]:hover {
+    background-color: @bg_disabled@;
+    border-color: @accent@;
+}
+#CollapsibleHeader[locked="true"] QPushButton {
+    color: @text_disabled@;
+}
+#CollapsibleHeader[locked="true"] QPushButton:hover {
+    color: @accent_text@;
+}
+/* 当前选中的那一组（被锁的都是"没选中的"，两者不会同时出现）。
+   描边和副标题用强调色 —— 用户扫一眼就知道"现在装的是它"。 */
+#CollapsibleHeader[selected="true"] {
+    border-color: @accent@;
+}
+#CollapsibleHeader[selected="true"] QPushButton {
+    color: @accent_text_strong@;
+}
+#CollapsibleHeader[selected="true"] #CollapsibleHeaderNote {
+    color: @accent_text@;
+}
+#CollapsibleBody, #RemoteVersionRow {
+    background-color: transparent;
+    border: none;
+}
+#RemoteVersionRow {
+    border-radius: 8px;
+}
+#RemoteVersionRow:hover {
+    background-color: @bg_elevated@;
+}
+/* 用户**已经选中**的那一行（安装选项页里挑加载器版本）。
+   ⚠️ 选了哪一行必须能一眼看出来，而且不能只靠悬停色 —— 悬停色鼠标一移开
+   就没了，用户会怀疑"我到底选上没有"。所以给个强调色的底 + 边。 */
+#RemoteVersionRow[picked="true"] {
+    background-color: @accent_bg@;
+    border: 1px solid @accent_border@;
+    border-radius: 8px;
+}
+#RemoteVersionRow[picked="true"]:hover {
+    background-color: @accent_selected_bg@;
+    border-color: @accent@;
+}
+
+/* 「网络环境不佳」那页的大感叹号。做得大而醒目，但用警告色而不是
+   危险色 —— 网络不通不是用户做错了什么。 */
+#NoticeIcon {
+    color: @warn@;
+    font-size: 52px;
+    font-weight: bold;
+}
+
+/* 取消下载：平时是普通中性按钮（继承上面的 QPushButton 基础样式），
+   悬停才变红。对齐实验那版 —— 直接挂 #DangerButton 的话一上来就是红的，
+   在一个"正常下载中"的窗口里太吵。 */
+#DownloadCancelButton:hover:enabled {
+    border-color: @danger@;
+    color: @danger_hover@;
+}
+
+/* 加载状态条（「正在获取模组加载器…」那儿的那条）。
+   移植自 experiments/Downloading mod test，但颜色用主题变量而不是写死 ——
+   那版是 setStyleSheet 里写死 #232428/#5ec269 的，主题一换不跟着变。 */
+#LoadingBar {
+    background-color: @bg_card@;
+    border: 1px solid @border@;
+    border-radius: 10px;
+}
+#LoadingBarText {
+    color: @text_secondary@;
+    font-size: 12px;
+}
+#LoadingBarTrack {
+    background-color: @bg_control@;
+    border: none;
+    border-radius: 3px;
+    min-height: 6px;
+    max-height: 6px;
+}
+#LoadingBarTrack::chunk {
+    background-color: @accent_fill@;
+    border-radius: 3px;
+}
+
+/* 下载 / 安装的进度窗口（布局对齐 experiments/Downloading mod test 里那版：
+   左边一列大读数 + 右边文件卡片 + 底部保存路径）。
+   ⚠️ 实验那版是把颜色写死在 setStyleSheet 里的 —— 它只跑深色所以没事，
+   我们两套主题，所以一律换成主题变量。
+   （⚠️ 注释里也别写出那个占位符本身：main_window 会扫全文找漏替换的变量，
+   注释里出现一次就会在启动时打一行"有没被替换的变量"的警告。）
+   ⚠️ QProgressBar 必须自己写 ::chunk 和槽底色：不写的话 Windows 上会画成
+   系统原生的方块条，跟主题完全不是一套东西。 */
+#DownloadWindow {
+    background-color: @bg_page@;
+}
+#DownloadTitle {
+    color: @text_bright@;
+    font-size: 15px;
+    font-weight: bold;
+}
+#DownloadSubtitle, #DownloadFooter {
+    color: @text_faint@;
+    font-size: 11px;
+}
+#DownloadCaption {
+    color: @text_faint@;
+    font-size: 11px;
+}
+#DownloadValue {
+    color: @text@;
+    font-size: 17px;
+    font-weight: bold;
+}
+/* 滚动区必须显式透明：不设的话它和 viewport 会露出系统默认的浅灰底，
+   在深色窗口里就是一大块刺眼的白（实验那版也踩过这个）。 */
+#DownloadScroll, #DownloadScroll > QWidget > QWidget, #DownloadListHost {
+    background: transparent;
+    border: none;
+}
+#DownloadRow {
+    background-color: @bg_card@;
+    border: 1px solid @border@;
+    border-radius: 8px;
+}
+#DownloadRow QLabel {
+    background-color: transparent;
+}
+#DownloadRowName {
+    color: @text@;
+    font-size: 12px;
+}
+#DownloadRowState {
+    color: @text_faint@;
+    font-size: 11px;
+}
+/* 状态色用属性选择器：代码里只 setProperty("kind", ...)，不写死颜色 */
+#DownloadRowState[kind="ok"] {
+    color: @accent@;
+}
+#DownloadRowState[kind="err"] {
+    color: @danger@;
+}
+#DownloadRowState[kind="dim"] {
+    color: @text_faint@;
+}
+#DownloadBar, #DownloadBarTotal {
+    background-color: @bg_control@;
+    border: none;
+    border-radius: 3px;
+}
+#DownloadBar {
+    min-height: 6px;
+    max-height: 6px;
+}
+#DownloadBarTotal {
+    min-height: 10px;
+    max-height: 10px;
+}
+#DownloadBar::chunk {
+    background-color: @accent_fill@;
+    border-radius: 3px;
+}
+#DownloadBarTotal::chunk {
+    background-color: @accent_fill@;
+    border-radius: 5px;
+}
