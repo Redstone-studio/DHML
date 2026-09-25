@@ -21,4 +21,6 @@ tag 早就到 v0.0.5-alpha 了，界面上显示的版本号是假的。）
 
 APP_NAME = "Mosslight"
 APP_DISPLAY_NAME = "Mosslight Launcher"
-APP_VERSION = "v0.5.6-alpha"
+# 2026-09：第一个**正式版**。之前一直挂着 -alpha，功能其实早就齐了
+# （装原版 / 加载器 / 整合包 / 模组，启动游戏，背景 + 动效）。
+APP_VERSION = "v1.0.0"

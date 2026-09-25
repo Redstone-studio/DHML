@@ -47,10 +47,13 @@ class Task:
     label: str = ""
     # 界面上显示成 `[库] xxx.jar` 那种前缀（跟实验里 `[Mod] xxx` 一个路子）
     kind: str = ""
+    # 备用地址（可选）：主地址挂了就试它们。给"只有单一来源、但整个安装都靠它"
+    # 的文件兜底 —— 典型是加载器的安装器 jar（见 core/download.py 的说明）
+    alt_urls: "list" = None
 
     def as_tuple(self):
-        return (self.url, self.path, self.sha1, self.size, self.label, self.kind)
-
+        return (self.url, self.path, self.sha1, self.size, self.label, self.kind,
+                self.alt_urls)
 
 @dataclass
 class InstallPlan:

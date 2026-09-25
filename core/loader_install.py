@@ -253,6 +253,7 @@ class LoaderPlan:
     key: str = ""
     version: str = ""
     version_id: str = ""
+    mc_id: str = ""                    # 游戏版本（安装器那套目录名靠它识别）
     version_dir: Path = None
     version_json: dict = field(default_factory=dict)
     libraries: "list" = field(default_factory=list)
@@ -368,15 +369,24 @@ def installer_plan(mc_version: str, key: str, loader_version: str, mc_dir,
     except setup.SetupError as e:
         raise LoaderError(str(e)) from e
 
+    # ⚠️ **备用地址**：Forge 的主地址是 BMCLAPI 自己的 `/forge/download?...`
+    # 接口（没法用 MIRROR_PAIRS 映射到官方），它偶尔会 403 —— 而整个 Forge
+    # 安装就靠这一个 jar（2026-09 真跑时 68 个文件里就它挂了，加载器直接装不了）。
+    # 给它配一个官方 maven 的备用地址，走「镜像 → 官方 → 备用」一路试下去。
+    alt_urls = []
+    if key == "forge":
+        alt_urls.append(setup.forge_maven_url(mc_version, loader_version))
+
     mc_dir = Path(mc_dir)
     jar = setup.installer_dir(mc_dir) / setup.installer_file_name(
         key, mc_version, loader_version)
     return LoaderPlan(
         key=key, version=loader_version, version_id=version_id,
+        mc_id=str(mc_version or ""),
         version_dir=mc_dir / "versions" / version_id,
         libraries=[install_mod.Task(
             url=url, path=jar, sha1="", size=0,
-            label=jar.name, kind=tr("安装器"))],
+            label=jar.name, kind=tr("安装器"), alt_urls=alt_urls)],
         installer=True, installer_jar=jar, installer_extra=extra,
     )
 
@@ -408,7 +418,7 @@ def installer_java(vanilla_vj: dict = None, key: str = "") -> "tuple":
 
 
 def finish_installer(plan: LoaderPlan, mc_dir, on_line=None,
-                     timeout: int = 0) -> "tuple[str, str]":
+                     timeout: int = 0, manager=None) -> "tuple[str, str]":
     """下载完之后：**跑安装器 → 校验 → 改成我们要的目录名**
 
     返回 `(最终版本目录名, 错误信息)`；出错时目录名给空串。
@@ -417,6 +427,10 @@ def finish_installer(plan: LoaderPlan, mc_dir, on_line=None,
 
     `on_line(text)` 收安装器的输出（**已经节流**，见 `loader_setup.OutputCollector`），
     子线程里调，别在里面碰控件。
+
+    `manager` 给了就**先替安装器把它那批库下好**（`loader_setup.installer_library_tasks`
+    —— 安装器自己从国外 maven 下那 36 个库，国内很容易下到一半被掐断然后整个
+    放弃，用户 2026-09 真机上就是这么失败的）。不给也能跑，只是慢了、而且更容易失败。
     """
     from core import loader_setup as setup
 
@@ -430,6 +444,25 @@ def finish_installer(plan: LoaderPlan, mc_dir, on_line=None,
     ok, _why = setup.verify_installed(mc_dir, wanted, "")
     if ok:
         return wanted, ""
+
+    # ---------- ① 替安装器先把它的库下好（走我们的镜像 + sha1 校验）----------
+    if manager is not None:
+        try:
+            tasks = setup.installer_library_tasks(plan.installer_jar, mc_dir)
+        except Exception:                               # noqa: BLE001
+            tasks = []
+        if tasks:
+            if on_line:
+                on_line(tr("先把安装器要的 {n} 个库用镜像下好（它自己下容易被掐断）",
+                           n=len(tasks)))
+            manager.add_all([t.as_tuple() for t in tasks])
+            manager.start()                 # 已经 start 过也安全（只会补新任务）
+            manager.wait_all(timeout=1800)
+            snap = manager.snapshot()
+            if snap.get("failed"):
+                if on_line:
+                    on_line(tr("有 {n} 个库没下下来，安装器可能还会自己去试",
+                               n=snap["failed"]))
 
     java, why = installer_java(plan.vanilla_vj, plan.key)
     if java is None:
@@ -461,18 +494,32 @@ def finish_installer(plan: LoaderPlan, mc_dir, on_line=None,
 
     made = setup.new_version_dirs(mc_dir, before)
     if not made:
-        # 没报错但也没新目录 —— 要么它写进了老目录，要么装了但被我们看成"已存在"
+        # ⚠️ **重跑**那条路：安装器那套名字的目录**上次就建好了**
+        # （比如上次中途失败），所以 `new_version_dirs()` 是空的。
+        # 不认它的话就会白跑一趟、报"没看到新的版本目录"，
+        # 而产物其实好好地躺在那儿（用户 2026-09 真机上撞到过）。
+        made = setup.installer_output_dirs(mc_dir, plan.key, plan.mc_id or "",
+                                           plan.version)
+        if made and on_line:
+            on_line(tr("安装器用的是上次那个目录：{name}", name=made[0]))
+    if not made:
+        # 没报错、也没新目录、也没有它自己命名的老目录 —— 实在认不出来了
         ok, why = setup.verify_installed(mc_dir, wanted, "")
         if ok:
             return wanted, ""
         return "", tr("安装器跑完了，但没看到新的版本目录（{why}）", why=why)
 
-    # ⚠️ 先校验再改名：半成品改名之后就更难认了（BUGS.md BUG-04）
-    final = made[0]
-    ok, why = setup.verify_installed(mc_dir, final, "")
-    if not ok:
+    # ⚠️ 先校验再改名：半成品改名之后就更难认了（BUGS.md BUG-04）。
+    # 候选可能不止一个（重跑时它自己命名的那些都在），挨个试，取第一个能用的。
+    final, why = "", ""
+    for name in made:
+        ok, why = setup.verify_installed(mc_dir, name, "")
+        if ok:
+            final = name
+            break
+    if not final:
         return "", tr("{name} 装了一半（{why}），删掉这个目录重试一次",
-                      name=final, why=why)
+                      name=made[0], why=why)
     try:
         final = setup.rename_version(mc_dir, final, wanted)
     except setup.SetupError as e:

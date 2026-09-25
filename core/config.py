@@ -183,6 +183,19 @@ DEFAULT_CONFIG = {
     # "先让用户自己开，出问题好定位"），所以这里照搬，别自作主张改成"关=单线程"。
     "multi_thread": False,
     "download_threads": 8,     # 1~32，见 THREAD_RANGE
+    # ---------- 背景 / 动效（移植自 experiments/Downloading mod test，见 core/appearance.py）----------
+    # 这些键**只在 core/appearance.py 里读写**，别处别直接摸（那边管类型纠正和范围）。
+    "bg_image": "",            # 背景图路径；"" = 不用图（纯色才生效）
+    "bg_mode": "center",       # 铺法：fill / fit / stretch / center / span
+    "bg_dim": 90,              # 压暗 0~200（亮背景会把卡片和字冲得看不清）
+    "bg_color": "",            # 纯色背景；"" = 用主题的页面色
+    "card_opacity": 100,       # 卡片底色不透明度 10~100（只动底色，不动文字）
+    "anim_fade": True,         # 入场动画带不带淡入（关掉能省一点合成开销）
+    "anim_preset": "slide_left",   # 动效风格，见 core/anim_prefs.py
+    "anim_speed": "normal",        # 速度档，见 core/anim_prefs.py
+    # 动效总开关。关掉之后列表**根本不包那层动画控件**（不是"动画时长为 0"），
+    # 所以是真的省开销：省掉每张卡片的离屏合成、定时器和属性动画。
+    "anim_enabled": True,
 }
 
 # 下载线程数：范围和默认值。改这里就够，界面和引擎都读它
@@ -279,6 +292,16 @@ _COERCE = {
     "known_minecraft_dirs": _as_dir_list,
     "multi_thread": as_bool,
     "download_threads": as_int,
+    # 背景 / 动效
+    "bg_image": as_str,
+    "bg_mode": as_str,
+    "bg_dim": as_int,
+    "bg_color": as_str,
+    "card_opacity": as_int,
+    "anim_fade": as_bool,
+    "anim_preset": as_str,
+    "anim_speed": as_str,
+    "anim_enabled": as_bool,
 }
 
 

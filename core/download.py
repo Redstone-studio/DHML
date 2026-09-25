@@ -129,8 +129,15 @@ class DownloadTask:
     """一个待下载的文件：状态 / 已收字节 / 速度 / 错误"""
 
     def __init__(self, url: str, dest, sha1: str = "", size: int = 0,
-                 label: str = "", kind: str = ""):
+                 label: str = "", kind: str = "", alt_urls=None):
         self.url = url
+        # ⚠️ **备用地址**（可选）：主地址挂了就试这些。用来给"只有一个源的
+        # 整包文件"兜底 —— 典型是加载器的安装器 jar：BMCLAPI 的
+        # `/forge/download?...` 是**它自己的接口**（没法用 MIRROR_PAIRS 映射到
+        # 官方 maven），它一 403 整个加载器就装不了（2026-09 真跑 Forge 时撞上：
+        # 68 个文件里就它挂了，装上不了）。给了备用地址之后走
+        # 「镜像 → 官方 → 备用…」一路试下去。
+        self.alt_urls = [u for u in (alt_urls or []) if u and u != url]
         self.dest = Path(dest)
         self.sha1 = (sha1 or "").lower()
         self.size = int(size or 0)
@@ -264,7 +271,7 @@ class DownloadManager:
     # ---------- 加任务 ----------
 
     def add(self, url: str, dest, sha1: str = "", size: int = 0, label: str = "",
-            kind: str = "") -> DownloadTask:
+            kind: str = "", alt_urls=None) -> DownloadTask:
         """加一个任务；**同一个目标文件只留一个任务**
 
         ⚠️ 去重不是洁癖，是必须的：版本 JSON 里同一个库真的会列两遍
@@ -278,19 +285,22 @@ class DownloadManager:
         with self._lock:
             if key in self._dest_index:
                 return self._dest_index[key]
-            task = DownloadTask(url, dest, sha1, size, label, kind)
+            task = DownloadTask(url, dest, sha1, size, label, kind, alt_urls)
             self.tasks.append(task)
             self._dest_index[key] = task
             return task
 
     def add_all(self, items) -> list:
-        """items: [(url, dest, sha1, size, label), ...] 或 dict 列表"""
+        """items: [(url, dest, sha1, size, label, kind, 备用地址), ...] 或 dict 列表
+
+        ⚠️ 第 7 项（备用地址）可以省 —— 老调用方给 6 项照样能用。
+        """
         out = []
         for it in items:
             if isinstance(it, dict):
                 out.append(self.add(it["url"], it["path"], it.get("sha1", ""),
                                     it.get("size", 0), it.get("label", ""),
-                                    it.get("kind", "")))
+                                    it.get("kind", ""), it.get("alt_urls")))
             else:
                 out.append(self.add(*it))
         return out
@@ -419,10 +429,16 @@ class DownloadManager:
         raise last if last is not None else RuntimeError("没有可用的下载源")
 
     def _try_urls(self, task: DownloadTask):
-        """按「镜像 → 官方」试**一轮**；成功返回 None，全挂了返回最后一个异常"""
+        """按「镜像 → 官方 → 备用地址」试**一轮**；成功返回 None，全挂了返回最后一个异常"""
         mirrored = mirror_url(task.url, self._mirror_usable())
         urls = [mirrored] + ([task.url] if mirrored != task.url else [])
         is_mirror = mirrored != task.url      # 第一个地址是不是镜像
+        # 备用地址也过一遍镜像映射（它可能是个官方地址，镜像能用就走镜像）
+        for alt in getattr(task, "alt_urls", []) or []:
+            alt_mirrored = mirror_url(alt, self._mirror_usable())
+            urls.append(alt_mirrored)
+            if alt_mirrored != alt:
+                urls.append(alt)
 
         last = None
         for idx, url in enumerate(urls):
