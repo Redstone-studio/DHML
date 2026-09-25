@@ -38,8 +38,9 @@ NO_TRANSLATE = {"简体中文", "繁體中文", "日本語"}
 
 # 这些调用的字符串参数算"走了文案系统"，不算漏网。
 # 后面几个是本项目自己的辅助方法：_card 是设置页建卡片用的，
-# 它内部用 self.label() 把标题登记进了文案系统。
-WRAPPERS = {"tr", "label", "button", "bind", "_card"}
+# 它内部用 self.label() 把标题登记进了文案系统（_field_row 同理，是
+# 版本设置页建"字段名 + 控件"那一行用的）。
+WRAPPERS = {"tr", "label", "button", "bind", "_card", "_field_row"}
 
 
 class Collector(ast.NodeVisitor):

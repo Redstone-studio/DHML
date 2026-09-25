@@ -150,6 +150,21 @@ def default_minecraft_dir() -> Path:
     except Exception:
         pass   # 配置模块出错时回退到默认，不影响扫描
 
+    return official_minecraft_dir()
+
+
+def official_minecraft_dir() -> Path:
+    """**官方启动器**自己会用的 .minecraft 位置（**不看配置**）
+
+    ⚠️ 跟 default_minecraft_dir() 的区别很要紧：那个回答的是"现在该用哪个目录"
+    （配置里写了就用配置的），这个回答的是"官方启动器会把存档放哪"。
+
+    拿这个去做「官方启动器文件夹」那一项 —— 用错的话，那一项会显示成
+    用户上次自己选的目录，标签和内容对不上（用户 2026-09 报过这个 bug）。
+    """
+    env = os.environ.get("MCLUNCHER_MINECRAFT_DIR")
+    if env:
+        return Path(env).expanduser()
     if os.name == "nt":
         return Path(os.environ.get("APPDATA", Path.home())) / ".minecraft"
     if sys.platform == "darwin":

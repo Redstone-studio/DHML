@@ -174,6 +174,9 @@ DEFAULT_CONFIG = {
     "theme": "system",        # system / dark / light，见 core/theme.py
     "accent_color": "",       # 空 = 用主题自带的强调色；否则 "#rrggbb"
     "last_version": "",       # 上次启动的版本 id，首页默认选中它
+    # 记住用过的 .minecraft 目录（PCL 那种"文件夹列表"）：最近的排前面。
+    # 只是方便下次再选，删掉也不影响功能。
+    "known_minecraft_dirs": [],
 }
 
 THEME_MODES = ("system", "dark", "light")
@@ -232,6 +235,25 @@ def _as_color(value, fallback):
     return fallback
 
 
+def _as_dir_list(value, fallback):
+    """一串目录路径（记住用过的 .minecraft）
+
+    只留字符串、去空、去重、保序。写坏了（比如手改成字符串）就当空的 ——
+    这个列表只是"方便下次再选"，丢了不影响任何功能，没必要为它报错。
+    """
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple)):
+        return list(fallback or [])
+    seen, out = set(), []
+    for item in value:
+        text = str(item).strip()
+        if text and text.lower() not in seen:
+            seen.add(text.lower())      # Windows 路径大小写不敏感
+            out.append(text)
+    return out
+
+
 _COERCE = {
     "config_version": as_int,
     "min_memory": as_int,
@@ -244,6 +266,7 @@ _COERCE = {
     "theme": _as_theme,
     "accent_color": _as_color,
     "last_version": as_str,
+    "known_minecraft_dirs": _as_dir_list,
 }
 
 
@@ -328,6 +351,20 @@ class Config:
     def set(self, key, value):
         self.data[key] = value
         return self.save()
+
+    def remember_minecraft_dir(self, path_text: str) -> bool:
+        """把一个目录记进"用过的列表"，最近的排最前面
+
+        目录列表只用来填那个下拉/列表，所以**去重按大小写不敏感**
+        （Windows 上 D:\\MC 和 d:\\mc 是同一个目录，记两条会让用户莫名其妙）。
+        """
+        text = str(path_text).strip()
+        if not text:
+            return False
+        known = [p for p in self.get("known_minecraft_dirs", [])
+                 if p.lower() != text.lower()]
+        known.insert(0, text)
+        return self.set("known_minecraft_dirs", known[:12])
 
     def get_minecraft_dir(self) -> Path:
         """返回有效的 .minecraft 路径

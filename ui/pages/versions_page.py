@@ -14,11 +14,11 @@
 
 from pathlib import Path
 
-from PyQt6.QtCore import QUrl, pyqtSignal
+from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QVBoxLayout
+    QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox,
+    QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget
 )
 
 from core.config import config
@@ -26,13 +26,14 @@ from core.i18n import tr
 from core.launch import load_version
 from core.repair import missing_libraries
 from core.resources import app_dir
-from core.versions import default_minecraft_dir
+from core.versions import official_minecraft_dir
 from core.versions import type_label as version_type_label
+from ui.icons import action_icon
 from ui.tasks import RepairTask
 from ui.translatable import TranslatableWidget
 from ui.widgets.version_list import VersionList
 
-DETAIL_WIDTH = 320
+DIR_WIDTH = 300      # 游戏目录那一列（右边的窄列）—— 300 是路径不折行的最小宽度
 
 
 def _set_tone(widget, object_name: str):
@@ -70,8 +71,11 @@ class VersionsPage(TranslatableWidget):
         layout.addWidget(self.label("选一个版本，或者换一个游戏目录", "PageSubtitle"))
         layout.addSpacing(12)
 
-        layout.addWidget(self._make_dir_card())
+        # 上：版本详情（整条横着放，见 _make_detail_card 的注释）
+        detail_card = self._make_detail_card()
+        layout.addWidget(detail_card)
 
+        # 中 + 右：版本列表（原位不变）+ 游戏目录（原来是页面顶部一条）
         body = QHBoxLayout()
         body.setSpacing(16)
 
@@ -90,7 +94,7 @@ class VersionsPage(TranslatableWidget):
         list_box.addWidget(self.label("双击一个版本可以直接回到启动页。", "HintText"))
         body.addWidget(list_card, 1)
 
-        body.addWidget(self._make_detail_card())
+        body.addWidget(self._make_dir_card())
         layout.addLayout(body, 1)
 
         self._refresh_dir_hint()
@@ -102,59 +106,151 @@ class VersionsPage(TranslatableWidget):
     def _make_dir_card(self):
         card = QFrame()
         card.setObjectName("Card")
+        card.setFixedWidth(DIR_WIDTH)      # 右上角那一列，跟左边列表并排
         box = QVBoxLayout(card)
-        box.setContentsMargins(20, 16, 20, 16)
+        box.setContentsMargins(18, 16, 18, 16)
         box.setSpacing(10)
 
         box.addWidget(self.label("游戏目录", "SectionTitle"))
 
-        row = QHBoxLayout()
-        row.setSpacing(10)
-
-        self.dir_combo = QComboBox()
-        self.dir_combo.setMinimumWidth(420)
-        self.dir_combo.currentIndexChanged.connect(self._on_dir_selected)
-        row.addWidget(self.dir_combo, 1)
-
-        self.browse_btn = self.button("浏览…")
-        self.browse_btn.clicked.connect(self._browse_dir)
-        row.addWidget(self.browse_btn)
-
-        # 目录不存在时才有用 —— 灰色的时候一眼知道"现在不用点"
-        self.create_btn = self.button("创建")
-        self.create_btn.clicked.connect(self._create_dir)
-        row.addWidget(self.create_btn)
-
-        row.addStretch()
-        box.addLayout(row)
+        # 竖着排：这一列只有 260 px，横排会让路径和按钮互相挤
+        # 用**列表**而不是下拉框：路径太长，下拉框里只能挤成一行、也看不出
+        # 有哪几个目录是"认识的"。列表每项两行（名字 + 路径）跟版本列表一个样。
+        self.dir_list = QListWidget()
+        self.dir_list.setObjectName("VersionList")     # 借版本列表的卡片行样式
+        self.dir_list.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.dir_list.currentItemChanged.connect(self._on_dir_selected)
+        box.addWidget(self.dir_list)
 
         self.dir_hint = QLabel()
         self.dir_hint.setObjectName("HintText")
         self.dir_hint.setWordWrap(True)
         box.addWidget(self.dir_hint)
 
+        box.addSpacing(4)
+        box.addWidget(self.label("添加或导入", "SidebarSectionLabel"))
+
+        # 图标是 svg（Qt 不支持 currentColor，所以深/浅各一份，见 ui/icons.action_icon）
+        self.new_btn = self.button("新建 .minecraft 文件夹")
+        self.new_btn.setIcon(action_icon("folder"))
+        self.new_btn.clicked.connect(self._create_dir)
+        box.addWidget(self.new_btn)
+
+        self.add_btn = self.button("添加已有文件夹")
+        self.add_btn.setIcon(action_icon("plus-circle"))
+        self.add_btn.clicked.connect(self._browse_dir)
+        box.addWidget(self.add_btn)
+
+        # 预留：整合包导入要联网下载解压，属于 v0.4 那批。先灰着并说明 ——
+        # 不留一个点了没反应的按钮。
+        self.import_btn = self.button("导入整合包")
+        self.import_btn.setIcon(action_icon("tool"))
+        self.import_btn.setEnabled(False)
+        self.import_btn.setToolTip(tr("整合包导入还没做（计划在 v0.4）"))
+        box.addWidget(self.import_btn)
+
+        box.addStretch()
         self._fill_dir_combo()
         return card
 
     @staticmethod
     def _presets():
+        """固定两项：官方启动器文件夹 + 启动器目录旁边
+
+        两个都是**算出来的**（不存配置），所以换台机器/换个位置自动就对 ——
+        这就是"自适应检测"。"启动器目录旁边"那个不存在时不用慌：
+        点「新建 .minecraft 文件夹」就地建一个。
+        """
         # 文案直接写在 tr() 里，提取工具才认得出
         return (
-            (tr("官方启动器目录"), default_minecraft_dir()),
+            (tr("官方启动器文件夹"), official_minecraft_dir()),
             (tr("启动器目录旁边"), app_dir() / ".minecraft"),
         )
 
+    @staticmethod
+    def _norm_dir(path_text: str) -> str:
+        r"""把目录路径统一成原生写法 + 小写，用来**比较**
+
+        ⚠️ 为什么必须统一：Qt 的文件对话框返回的是**正斜杠**（`D:/MC/foo`），
+        而配置里、预设里都是反斜杠（`D:\MC\foo`）。不统一的话两边对不上，
+        代码会以为"当前用的目录不在列表里"，于是**多冒出一项「当前使用」**
+        （用户 2026-09 报过）。大小写同理（Windows 不敏感）。
+        """
+        try:
+            return str(Path(path_text)).lower()
+        except (OSError, ValueError, TypeError):
+            return str(path_text).lower()
+    @staticmethod
+    def _dir_label(path_text: str) -> str:
+        """列表里那一项的标题
+
+        `.minecraft` 结尾的取**上一级**目录名（`D:\\DHML\\.minecraft` → `DHML`），
+        不然列表里会是一串一模一样的 ".minecraft"，谁也分不清哪个是哪个。
+        """
+        p = Path(path_text)
+        if p.name.lower() == ".minecraft":
+            return p.parent.name or str(p.parent)
+        return p.name or path_text
+
+    def _make_dir_row(self, label: str, path_text: str):
+        """列表里的一行：名字（大）+ 路径（**更小的字**）
+
+        为什么不用 `QListWidgetItem("名字\n路径")` 那种两行文本：
+        一个 item 只有一个字体，两行只能一样大；路径通常很长，跟名字一样大
+        会把名字压下去。所以用自定义控件（跟版本列表那些行一个做法），
+        路径用 `#DirRowPath` 那个 11px 的小字。
+        """
+        item = QListWidgetItem()
+        item.setData(Qt.ItemDataRole.UserRole, path_text)
+
+        row = QWidget()
+        # ⚠️ 这层控件会盖在 item 的选中底色上面：它自己必须**透明**，
+        # 否则选中高亮就被糊掉了（QSS 里 #DirRow 那一条就是干这个的）
+        row.setObjectName("DirRow")
+        box = QVBoxLayout(row)
+        box.setContentsMargins(10, 6, 10, 6)
+        box.setSpacing(1)
+
+        name = QLabel(label)
+        name.setObjectName("DirRowName")
+        box.addWidget(name)
+
+        path = QLabel(path_text)
+        path.setObjectName("DirRowPath")
+        path.setToolTip(path_text)
+        box.addWidget(path)
+
+        item.setSizeHint(row.sizeHint())
+        # ⚠️ 这里**不能** setItemWidget：item 还没 addItem 进列表，Qt 认为
+        # 那个控件没有归属，会把它销毁 —— 表现就是"行是空的，只有选中高亮"。
+        # 挂控件必须在 addItem 之后（见 _fill_dir_combo）。
+        return item, row
     def _fill_dir_combo(self):
+        """把"认识的目录"填进列表：固定两项 + 记住用过的 + 当前在用的
+
+        ⚠️ 名字里的 combo 是历史（以前是 QComboBox）—— 改名的代价是
+        retranslate() 等三处调用点都要跟着改，不值得，就这样留着。
+        """
         current = str(config.get_minecraft_dir())
-        self.dir_combo.blockSignals(True)
-        self.dir_combo.clear()
-        for label, path in self._presets():
-            self.dir_combo.addItem(f"{label} · {path}", str(path))
-        # 现在用的不是预设里的（用户自己挑过）→ 补一项，否则一打开就被悄悄改掉
-        if self.dir_combo.findData(current) < 0:
-            self.dir_combo.addItem(tr("自定义：{path}", path=current), current)
-        self.dir_combo.setCurrentIndex(max(0, self.dir_combo.findData(current)))
-        self.dir_combo.blockSignals(False)
+        entries = list(self._presets())
+        seen = {self._norm_dir(str(path)) for _label, path in entries}
+        for text in config.get("known_minecraft_dirs", []):
+            if self._norm_dir(text) not in seen:
+                entries.append((self._dir_label(text), Path(text)))
+                seen.add(self._norm_dir(text))
+        if self._norm_dir(current) not in seen:
+            entries.append((tr("当前使用"), Path(current)))
+
+        self.dir_list.blockSignals(True)
+        self.dir_list.clear()
+        for label, path in entries:
+            item, row = self._make_dir_row(label, str(path))
+            self.dir_list.addItem(item)               # ★ 先加进列表
+            self.dir_list.setItemWidget(item, row)    # ★ 再挂控件（顺序不能反）
+            if self._norm_dir(str(path)) == self._norm_dir(current):
+                self.dir_list.setCurrentItem(item)
+        self.dir_list.blockSignals(False)
 
     def _refresh_dir_hint(self):
         path = config.get_minecraft_dir()
@@ -162,22 +258,37 @@ class VersionsPage(TranslatableWidget):
             exists = path.is_dir()
         except OSError:
             exists = False
-        self.create_btn.setEnabled(not exists)
+
+        # 「新建 .minecraft 文件夹」**只有启动器旁边还没有的时候才出现**：
+        # 已经有了就别再摆一个"要不要建"的按钮（用户 2026-09 要求）。
+        # 注意看的是"启动器旁边那个"，跟当前选中的目录是哪个无关 ——
+        # 这个按钮建的永远是启动器旁边那个，所以它存在就该藏起来。
+        try:
+            beside_exists = (app_dir() / ".minecraft").is_dir()
+        except OSError:
+            beside_exists = False
+        self.new_btn.setVisible(not beside_exists)
+
         if exists:
             self.dir_hint.setText(tr("当前游戏目录：{path}", path=path))
         else:
-            self.dir_hint.setText(
-                tr("⚠ {path} 不存在，点「创建」新建一个 .minecraft", path=path))
+            self.dir_hint.setText(tr(
+                "⚠ {path} 不存在 —— 点「新建 .minecraft 文件夹」就地建一个。",
+                path=path))
 
-    def _on_dir_selected(self, _index: int):
-        if self._loading:
+    def _on_dir_selected(self, current, _previous=None):
+        if self._loading or current is None:
             return
-        path = self.dir_combo.currentData()
+        path = current.data(Qt.ItemDataRole.UserRole)
         if path:
             self._apply_dir(path)
 
     def _apply_dir(self, path_text: str):
+        # 归一化：浏览框给的是正斜杠，存进配置前统一成原生写法
+        path_text = str(Path(path_text))
         config.set("minecraft_dir", path_text)
+        # 记进"用过的列表"：下次打开还在列表里，不用重新浏览一遍
+        config.remember_minecraft_dir(path_text)
         self._refresh_dir_hint()
         self.version_list.reset_scanner()
         self.config_changed.emit()
@@ -214,38 +325,62 @@ class VersionsPage(TranslatableWidget):
         self._fill_dir_combo()
 
     def _create_dir(self):
-        path = config.get_minecraft_dir()
+        """在**启动器目录旁边**建一个 .minecraft 并切过去
+
+        目标写死成"启动器旁边"（user 2026-09 定）：这样"自动检测"和
+        "检测不到时让用户决定要不要建"就是同一件事 —— 列表里那一项显示
+        "不存在"时，点这个按钮就地建好并用上。
+        """
+        path = app_dir() / ".minecraft"
         try:
             path.mkdir(parents=True, exist_ok=True)
             (path / "versions").mkdir(exist_ok=True)
         except OSError as e:
             QMessageBox.warning(self, tr("创建失败"), str(e))
             return
-        self._refresh_dir_hint()
-        self.version_list.reset_scanner()
-        self.config_changed.emit()
+        self._apply_dir(str(path))      # 里面会记住它 + 重扫 + 通知别的页
+        self._fill_dir_combo()
 
-    # ---------- 右侧详情 ----------
+    # ---------- 顶部详情（2026-09 改：原来是右边一列）----------
+    #
+    # 为什么挪到顶部整条：右边那列只有 320 px，名字长的版本会折成三四行，
+    # 三个按钮也只能竖着堆；而它左边紧挨着应用自己的侧边栏，看起来像"两个导航栏"。
+    # 变成顶部横条之后按钮能横着排，版本列表的宽度也回来了。
 
     def _make_detail_card(self):
         card = QFrame()
         card.setObjectName("Card")
-        card.setFixedWidth(DETAIL_WIDTH)
         box = QVBoxLayout(card)
-        box.setContentsMargins(20, 20, 20, 18)
-        box.setSpacing(10)
+        box.setContentsMargins(20, 16, 20, 16)
+        box.setSpacing(8)
 
-        box.addWidget(self.label("版本详情", "SectionTitle"))
+        # 第一行：标题 + 版本名 + 元信息 + 三个按钮（靠右）
+        head = QHBoxLayout()
+        head.setSpacing(12)
+        head.addWidget(self.label("版本详情", "SectionTitle"))
 
         self.detail_name = QLabel()
         self.detail_name.setObjectName("VersionRowName")
-        self.detail_name.setWordWrap(True)
-        box.addWidget(self.detail_name)
+        head.addWidget(self.detail_name)
 
         self.detail_meta = QLabel()
         self.detail_meta.setObjectName("VersionRowMeta")
-        self.detail_meta.setWordWrap(True)
-        box.addWidget(self.detail_meta)
+        head.addWidget(self.detail_meta)
+
+        head.addStretch()
+
+        self.settings_btn = self.button("版本设置")
+        self.settings_btn.clicked.connect(self._open_settings)
+        head.addWidget(self.settings_btn)
+
+        self.folder_btn = self.button("打开文件夹")
+        self.folder_btn.clicked.connect(self._open_folder)
+        head.addWidget(self.folder_btn)
+
+        self.repair_btn = self.button("补全缺失的库")
+        self.repair_btn.clicked.connect(self._start_repair)
+        head.addWidget(self.repair_btn)
+        box.addLayout(head)
 
         self.detail_path = QLabel()
         self.detail_path.setObjectName("HintText")
@@ -261,20 +396,6 @@ class VersionsPage(TranslatableWidget):
         self.progress.setObjectName("HintText")
         self.progress.setWordWrap(True)
         box.addWidget(self.progress)
-
-        box.addStretch()
-
-        self.settings_btn = self.button("版本设置")
-        self.settings_btn.clicked.connect(self._open_settings)
-        box.addWidget(self.settings_btn)
-
-        self.folder_btn = self.button("打开文件夹")
-        self.folder_btn.clicked.connect(self._open_folder)
-        box.addWidget(self.folder_btn)
-
-        self.repair_btn = self.button("补全缺失的库")
-        self.repair_btn.clicked.connect(self._start_repair)
-        box.addWidget(self.repair_btn)
 
         return card
 
