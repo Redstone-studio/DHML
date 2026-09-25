@@ -741,6 +741,8 @@ class ModsPage(TranslatableWidget):
         self._icon_lock = threading.Lock()
         self._icon_queue = []           # [(url, bytes)] 主线程来收
         self._icon_asked = set()        # 已经发过请求的 url（去重）
+        # 还在路上的图标请求数（`_is_busy()` 靠它把轮询留到图标回来为止）
+        self._icon_pending = 0
 
         self._query = ""
         self._offset = 0
@@ -1993,6 +1995,14 @@ class ModsPage(TranslatableWidget):
         if url in self._icon_asked:
             return
         self._icon_asked.add(url)
+        # ⚠️ 记"有几个图标请求还在路上"，`_is_busy()` 要拿它决定轮询停不停。
+        # 少了这一步就是真 bug：`_load_icon` 起了线程后只 `self._timer.start()`，
+        # 而定时器 150ms 后第一次 `_poll` 时队列**还是空的**、又没有别的活在跑，
+        # `_is_busy()` 返回 False → 定时器自己停掉；等图标真的回来时已经没人来收，
+        # 那一行就永远是问号（实测撞到过：6 张卡片的图标一个都没上）。
+        # 线程里只做 +=/-=（CPython 下够安全），碰 QTimer 那种 GUI 对象才是禁区。
+        with self._icon_lock:
+            self._icon_pending += 1
 
         def work():
             try:
@@ -2006,6 +2016,7 @@ class ModsPage(TranslatableWidget):
                 data = b""
             with self._icon_lock:
                 self._icon_queue.append((url, data))
+                self._icon_pending = max(0, self._icon_pending - 1)
 
         threading.Thread(target=work, daemon=True).start()
         self._timer.start()
@@ -2041,12 +2052,18 @@ class ModsPage(TranslatableWidget):
             self._timer.stop()
 
     def _is_busy(self) -> bool:
-        """还有后台活在跑吗（决定轮询要不要继续）"""
+        """还有后台活在跑吗（决定轮询要不要继续）
+
+        ⚠️ `_icon_pending` 这一项**不能少**：图标是"起个线程去下、下完推进队列"，
+        少了它就会出现"队列还空着 → 判定没活 → 定时器停 → 图标回来没人收"
+        （见 `_load_icon` 里那段说明）。
+        """
         return bool(
             self._loading
             or self._search_result is not None
             or self._detail_result is not None
             or self._icon_queue
+            or self._icon_pending
             or not self._install_done and self._install_manager is not None
             # 整合包安装是一串步骤，状态收完之前不能让轮询停掉
             or self._mp_state.get("stage") == "working"
