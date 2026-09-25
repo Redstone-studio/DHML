@@ -232,6 +232,11 @@ def parse_optifine(data) -> list:
             "stable": True,
             "filename": filename,
             "forge": str(item.get("forge") or ""),
+            # ⚠️ type / patch 要**带出去**：OptiFine 的安装器下载地址是
+            # `/optifine/<mc>/<type>/<patch>`（`core/loader_setup.installer_url`），
+            # 光有拼出来的 version 反推不出这两段（预览版那种更是拼不回来）。
+            "type": vtype,
+            "patch": str(item.get("patch") or ""),
             "_sort": _version_key(version),
         })
     return _sorted(out)
@@ -364,10 +369,14 @@ def row_by_key(rows: list, key: str):
 # 各加载器在文件夹名里**怎么拼**（照 PCL 的约定，实测这台机器上的目录名）：
 #     1.20.4-Fabric 0.19.5          ← Fabric 用**空格**
 #     1.12.2-Forge_14.23.5.2864     ← Forge 用**下划线**
-# NeoForge / Quilt / OptiFine 的约定没实测过（这台机器上没有），用空格
-# 兜底 —— ⚠️ 这跟 `core/mc_dir.py` 是**兼容**的：那边只要求
-# "`-` 后面以加载器名开头"，不管后面跟空格还是下划线（见 match_version）。
-_SEPARATOR_UNDERSCORE = ("forge",)
+#     1.20.1-OptiFine_HD_U_I5       ← OptiFine 自己装出来就是**下划线**（实测）
+#     NeoForge 跟着 Forge 用下划线（它是 Forge 的分叉，PCL 也那么拼）
+# ⚠️ 用下划线还有个实在好处：**跟安装器自己起的名字一致就不用改名了**
+# （OptiFine 那条路上，"改名"还牵扯到目录里那个 23 MB 的补丁 jar，
+# 能不动就不动 —— 见 `core/loader_setup.rename_version()`）。
+# ⚠️ 这跟 `core/mc_dir.py` 是**兼容**的：那边只要求"`-` 后面以加载器名
+# 开头"，不管后面跟空格还是下划线（见 match_version）。
+_SEPARATOR_UNDERSCORE = ("forge", "neoforge", "optifine")
 # 文件夹名里用的名字（不要 `.capitalize()`：那会把 NeoForge 变成 Neoforge）
 FOLDER_NAMES = {
     "forge": "Forge",

@@ -28,6 +28,8 @@ Modrinth 的搜索结果是实时的，缓存反而会让搜索结果过期。
 import hashlib
 from pathlib import Path
 
+from core.config import get_config_dir
+
 # 解析出来的缓存目录（见 cache_dir 的说明）
 _RESOLVED = None
 
@@ -118,6 +120,75 @@ def save_icon(url: str, data: bytes) -> bool:
     except OSError as e:
         print("[Cache] 图标写不进缓存（%s）：%s" % (type(e).__name__, e))
         return False
+
+
+def version_icon_dir() -> Path:
+    """**版本图标**放哪儿：`<配置目录>/icons`
+
+    ⚠️ 跟上面那个"mod 图标缓存"**不是一个地方**：
+      · 缓存（`cache/icons/*.bin`）是"临时下载的、清掉也无所谓"
+      · 版本图标（`icons/*.png`）是**用户的东西** —— 版本设置页能挑，
+        清缓存绝不能把它删了（见 `ui/icons.custom_icon_path`）
+    """
+    folder = get_config_dir() / "icons"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return folder
+
+
+def install_version_icon(version_id: str, url: str, timeout=(10, 20)) -> str:
+    """把一张网络图存成某个版本的图标，返回文件名（失败返回空串）
+
+    用途：装完整合包，把 Modrinth 上那个包的图标设成实例的图标
+    （PCL 也干这事 —— 它把包图标复制成 `PCL/Logo.png`）。
+
+    我们的约定（`ui/icons.custom_icon_path`）：图放 `<配置目录>/icons/<名字>.png`，
+    再给 `versions.json` 里那个版本写一条 `icon` 覆盖项。
+
+    ⚠️ **失败一律吞掉**：图标是锦上添花，绝不能因为它让整包装不上 ——
+    但也别静默，留一行 print。
+    """
+    version_id = str(version_id or "").strip()
+    url = str(url or "").strip()
+    if not version_id or not url:
+        return ""
+
+    import requests
+    from core.download import USER_AGENT
+    from core.version_settings import version_settings
+
+    try:
+        r = requests.get(url, headers={"User-Agent": USER_AGENT},
+                         timeout=timeout)
+        r.raise_for_status()
+        data = r.content
+    except Exception as e:                      # noqa: BLE001
+        print("[Cache] 版本图标下载失败（%s）：%s" % (type(e).__name__, e))
+        return ""
+    if not data:
+        return ""
+
+    # 存成 png 扩展名：Qt 是按**内容**认格式的，扩展名只是给我们自己看的
+    stem = "".join(c for c in version_id if c not in '\\/:*?"<>|').strip()
+    stem = (stem or "modpack")[:48]
+    name = "%s.png" % stem
+    try:
+        path = version_icon_dir() / name
+        path.write_bytes(data)
+    except OSError as e:
+        print("[Cache] 版本图标写不进去：%s" % e)
+        return ""
+
+    try:
+        cur = dict(version_settings.get(version_id))
+        cur["icon"] = name
+        version_settings.update(version_id, cur)
+    except Exception as e:                      # noqa: BLE001
+        print("[Cache] 版本图标记不进 versions.json：%s" % e)
+        return ""
+    return name
 
 
 def clear_icons() -> int:

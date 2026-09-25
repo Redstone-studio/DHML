@@ -255,23 +255,41 @@ QScrollArea > QWidget > QWidget {
     font-size: 12px;
     font-weight: normal;
 }
+/* 标题右边的**小动作按钮**（现在只有安装选项页的「取消选择」用它）。
+   ⚠️ 要写在 `#CollapsibleHeader QPushButton` **后面**压过它：那条把框里所有
+   按钮都拍扁成"透明无边框"了，小按钮得自己把边框和字号要回来。
+   ⚠️ 它是"标题里的一个次要动作"，字号跟副标题一样大就够了 ——
+   做成跟标题一样大反而会抢注意力。 */
+#CollapsibleHeader QPushButton#CollapsibleAction {
+    background-color: transparent;
+    border: 1px solid @accent_border@;
+    border-radius: 6px;
+    padding: 2px 8px;
+    color: @accent_text@;
+    font-size: 12px;
+    font-weight: normal;
+}
+#CollapsibleHeader QPushButton#CollapsibleAction:hover {
+    background-color: @accent_bg@;
+    border-color: @accent@;
+    color: @accent_text_strong@;
+}
 /* 锁着的组（加载器互斥：现在装的是别家）。
-   ⚠️ 底色压暗，但**悬停仍然给反馈** —— 点它 = 改选这一家（不是点不动），
-   完全没反馈的话用户根本不会去点。
-   ⚠️ 悬停只改描边、不改底色：底色一变亮就像"已经是选中的那个"了。 */
+   ⚠️ **悬停效果要一起撤掉**：它现在真的点不动了（标题按钮禁用），
+   鼠标划过去变绿等于骗用户"这里能点"。 */
 #CollapsibleHeader[locked="true"] {
     background-color: @bg_disabled@;
     border-color: @border_disabled@;
 }
 #CollapsibleHeader[locked="true"]:hover {
     background-color: @bg_disabled@;
-    border-color: @accent@;
+    border-color: @border_disabled@;
 }
 #CollapsibleHeader[locked="true"] QPushButton {
     color: @text_disabled@;
 }
 #CollapsibleHeader[locked="true"] QPushButton:hover {
-    color: @accent_text@;
+    color: @text_disabled@;
 }
 /* 当前选中的那一组（被锁的都是"没选中的"，两者不会同时出现）。
    描边和副标题用强调色 —— 用户扫一眼就知道"现在装的是它"。 */
@@ -381,6 +399,18 @@ QScrollArea > QWidget > QWidget {
 #DownloadScroll, #DownloadScroll > QWidget > QWidget, #DownloadListHost {
     background: transparent;
     border: none;
+}
+/* 安装器控制台（Forge 那几家装的时候才出现，见 DownloadWindow.stage_begin）。
+   ⚠️ QPlainTextEdit 不写这些的话会露出系统白底 + 一条凹陷边框，
+   在深色窗口里就是一块刺眼的白。字体用等宽：安装器的输出有对齐的表格。 */
+#DownloadConsole {
+    background-color: @bg_control@;
+    color: @text_faint@;
+    border: 1px solid @border@;
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px;
 }
 #DownloadRow {
     background-color: @bg_card@;

@@ -28,6 +28,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core import branding
 from core.app_info import APP_NAME as DEFAULT_LAUNCHER_NAME
 from core.app_info import APP_VERSION as DEFAULT_LAUNCHER_VERSION
 from core.i18n import tr
@@ -266,6 +267,19 @@ def load_version(mc_dir, version_id: str) -> dict:
             # 没有父版本，但 JSON 自己可能就写了重复项（老版本常见），照样去重
             merged = dict(raw)
             merged["libraries"] = _sorted_libraries({}, raw)
+        # ⚠️ 继承链合出来的 `jar` 只看了 **JSON 字段**，漏了"自己目录里就躺着一个
+        # `<id>.jar`"这种情况 —— 而官方启动器的规矩是**自己目录里那个优先**。
+        #
+        #   OptiFine 就是踩这个：它的 JSON 是 `inheritsFrom: 1.20.1`、**没有** jar
+        #   字段，但自己目录里有一个 23 MB 的 `<id>.jar`（打过补丁的客户端）。
+        #   照 `merge_version` 那条回退会退回父版本的原版 jar —— 等于 OptiFine
+        #   白装了（进游戏一看没有光影），而且**一声不响**。
+        #
+        # 只在 JSON **没有**明确写 `jar` 时才补这一刀：显式写了就听它的
+        # （Forge 1.16- 那种 `"jar": "<自己的目录名>"` 的写法不能被顶掉）。
+        if not raw.get("jar") and (mc_dir / "versions" / vid
+                                   / f"{vid}.jar").is_file():
+            merged["jar"] = vid
         cache[vid] = merged
         return merged
 
@@ -301,6 +315,13 @@ class LaunchRequest:
     version_type: str = ""         # 留空则用 JSON 里的 type
     # 这个版本额外要加的 JVM 参数（版本设置里填的，见 core/version_settings.py）
     extra_jvm_args: str = ""
+    # 加载器的显示名（`Fabric` / `Forge`…）。只用来拼「版本信息」那个品牌串。
+    # ⚠️ JSON 里没有这个东西（它只在目录名/我们的元数据里），所以由调用方传
+    # （扫描器 `core/versions.py` 已经算好了 `loader_label`）。
+    loader_label: str = ""
+    # 这个版本是不是"版本隔离"的（决定去哪个 `mods/` 数模组）。
+    # None = 不知道 → 两边都数（见 core/branding.mod_dirs）
+    isolated: bool = None
     # 额外要加的游戏参数（版本设置里的"游戏参数"，追加在 JSON 自带参数后面）
     extra_game_args: str = ""
     # 自动进入服务器："ip" 或 "ip:port"。空 = 不自动进服
@@ -323,6 +344,39 @@ class LaunchPlan:
     mc_dir: Path = None
     version_id: str = ""
     version_json: dict = field(default_factory=dict)
+    # `${version_type}` 最终用的那个值 —— 它就是**游戏主界面那行字里斜杠后面那段**
+    # （启动器品牌就塞在这儿）。单独留一份是为了能打日志：不然"游戏里怎么没显示品牌"
+    # 这种事，日志里一点线索都没有（用户 2026-09 就是这么问的）。
+    version_type: str = ""
+
+    def describe(self) -> str:
+        """给日志用的一行命令（**路径缩短 + classpath 折叠**）
+
+        完整的命令行有几十个 classpath 路径、几 KB 长，直接打进日志窗口没法看。
+        这里只做两件事：把 mc_dir 前缀缩成相对路径、把 `-cp` 那一长串换成
+        `<N 个文件>`。**别的参数一个不删** —— `--versionType` / `-Xmx` /
+        用户自己加的 JVM 参数正是要靠这一行看的，早先这里截断到十几个参数，
+        结果把游戏参数（`--versionType` 就在那儿）全截掉了，等于白打。
+        """
+        out = []
+        skip_next = False
+        for i, arg in enumerate(self.args):
+            if skip_next:
+                skip_next = False
+                continue
+            if arg == "-cp" and i + 1 < len(self.args):
+                out.append("-cp")
+                out.append("<%d 个文件>" % len(str(self.args[i + 1]).split(";")))
+                skip_next = True
+                continue
+            text = str(arg)
+            if self.mc_dir:
+                prefix = str(self.mc_dir)
+                text = text.replace(prefix + "\\", "").replace(prefix + "/", "")
+            if len(text) > 200:
+                text = text[:200] + "…"
+            out.append(text)
+        return " ".join(out)
 
 
 def _version_dir(mc_dir: Path, version_id: str) -> Path:
@@ -444,6 +498,16 @@ def build_launch_plan(req: LaunchRequest, version: dict = None) -> LaunchPlan:
 
     # ---------- 占位符 ----------
     assets_index = (vj.get("assetIndex") or {}).get("id", "")
+    # ⚠️ `${version_type}` = 游戏**主界面那行字**里唯一由启动器控制的部分：
+    # `"Minecraft " + 版本名 + (type == "release" ? "" : "/" + type)`（1.20.4 实测）。
+    # 用户填过「自定义信息」就用他的；没填就给一份品牌默认值（`Mosslight/Fabric`），
+    # 这就是"启动器名字进游戏"。填 `release` 可以关掉它（游戏那边按原样不显示）。
+    # 见 core/branding.py 的模块说明（以及为什么不是"改 version.json"）。
+    version_type = str(req.version_type or "").strip()
+    if not version_type:
+        mods = branding.mod_dirs(mc_dir, version_dir, req.isolated)
+        version_type = branding.launch_brand(req.loader_label,
+                                             branding.count_mods(*mods))
     replacements = {
         "${natives_directory}": str(natives_dir),
         "${classpath}": classpath_str,
@@ -458,7 +522,7 @@ def build_launch_plan(req: LaunchRequest, version: dict = None) -> LaunchPlan:
         "${auth_xuid}": "",
         "${user_type}": req.user_type,
         "${version_name}": version_id,
-        "${version_type}": req.version_type or vj.get("type", "release"),
+        "${version_type}": version_type or vj.get("type", "release"),
         "${game_directory}": str(version_dir),
         "${assets_root}": str(mc_dir / "assets"),
         "${assets_index_name}": assets_index,
@@ -602,4 +666,5 @@ def build_launch_plan(req: LaunchRequest, version: dict = None) -> LaunchPlan:
         mc_dir=mc_dir,
         version_id=version_id,
         version_json=vj,
+        version_type=version_type or vj.get("type", "release"),
     )
