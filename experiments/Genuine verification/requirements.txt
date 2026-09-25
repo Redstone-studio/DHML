@@ -1,0 +1,6 @@
+# 运行依赖
+PyQt6>=6.6
+
+# 取头像用（ui/avatar_remote.py）。协议部分（core/verify/mcping.py、srv.py）
+# 只用标准库 socket，不依赖它。
+requests>=2.28

@@ -1,0 +1,148 @@
+/* ============================================================================
+   正版验证页自己的样式
+
+   ⚠️ 颜色一律用 @变量@，**不要写死 #rrggbb** —— 这些变量由 core/theme.py
+   在加载时替换，写死了浅色主题下就会漏掉这条规则（主项目 app.qss 开头写的规矩）。
+
+   这个文件是**实验项目自己加的**，主项目那份 assets/styles/parts/ 里没有它。
+   文件名按主项目的约定取（数字 = 加载顺序，后面的覆盖前面的）。
+
+   用的 objectName：
+     #MethodTab        验证方式那一排按钮
+     #VerifyBanner*    结果横幅（四态四色）
+     #PlayerCard       在线玩家卡片
+     #PlayerCardMe     就是当前要验证的那个玩家（描边高亮）
+     #PlayerAvatar     头像方块
+     #PlayerName / #PlayerMeta
+     #ResultDetail     那一行小字（实际连接的地址 / 耗时 / 版本 / MOTD）
+   ============================================================================ */
+
+/* ---------------- 验证方式：一排可切换的按钮 ---------------- */
+
+#MethodTab {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 8px;
+    padding: 8px 18px;
+    color: @text_dim@;
+    font-size: 13px;
+}
+#MethodTab:hover {
+    background-color: @bg_hover@;
+    border-color: @border_hover@;
+    color: @text@;
+}
+#MethodTab:checked {
+    background-color: @accent_bg@;
+    border-color: @accent_border@;
+    color: @accent_text@;
+    font-weight: bold;
+}
+/* 没实现的方式：压暗、不要有悬停反馈，别让用户以为能点 */
+#MethodTab:disabled {
+    background-color: @bg_disabled@;
+    border-color: @border_disabled@;
+    color: @text_disabled@;
+}
+
+/* ---------------- 结果横幅 ---------------- */
+
+#VerifyBanner {
+    background-color: @bg_control@;
+    border: 1px solid @border_control@;
+    border-radius: 10px;
+    color: @text_secondary@;
+    padding: 12px 14px;
+    font-size: 13px;
+}
+#VerifyBannerOk {
+    background-color: @accent_bg@;
+    border: 1px solid @accent_border@;
+    color: @accent_text_strong@;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+}
+#VerifyBannerWarn {
+    background-color: @warn_bg@;
+    border: 1px solid @warn_border@;
+    color: @warn@;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+}
+#VerifyBannerBad {
+    background-color: @danger_bg@;
+    border: 1px solid @danger_border_strong@;
+    color: @danger@;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+}
+
+/* ---------------- 在线玩家 ---------------- */
+
+#PlayerCard {
+    background-color: @bg_card@;
+    border: 1px solid @border@;
+    border-radius: 10px;
+}
+#PlayerCard:hover {
+    background-color: @bg_elevated@;
+    border-color: @border_control@;
+}
+/* "就是你"那张：描边用强调色，一眼能找出来 */
+#PlayerCardMe {
+    background-color: @accent_bg@;
+    border: 1px solid @accent_border@;
+    border-radius: 10px;
+}
+
+/* 头像方块。图是自己在代码里切好圆角画上去的（QSS 的 border-radius
+   管不动 QLabel 里的图片，见 ui/avatar_remote.round_pixmap），
+   这里只兜住"还没加载出来"时那个首字母的底 */
+#PlayerAvatar {
+    background-color: @avatar_bg@;
+    color: @on_accent@;
+    border-radius: 20px;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+#PlayerName {
+    color: @text@;
+    font-size: 14px;
+    font-weight: bold;
+}
+#PlayerMeta {
+    color: @text_faint@;
+    font-size: 11px;
+}
+
+/* ---------------- 结果小字 ---------------- */
+
+#ResultDetail {
+    color: @text_faint@;
+    font-size: 11px;
+}
+
+/* ---------------- 微软设备码 ---------------- */
+
+/* 那串码是**要用眼睛抄到浏览器里**的，所以：等宽、很大、字距拉开。
+   用小字或者和正文一样的话，抄错一个字符就白等一轮。 */
+#DeviceCode {
+    color: @accent_text_strong@;
+    background-color: @bg_control@;
+    border: 1px solid @accent_border@;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: 24px;
+    font-weight: bold;
+    letter-spacing: 3px;
+}
+
+#DeviceUrl {
+    color: @accent@;
+    font-size: 13px;
+}

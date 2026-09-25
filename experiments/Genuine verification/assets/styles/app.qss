@@ -1,0 +1,166 @@
+/* ============================================================================
+   Mosslight 界面样式（模板）
+
+   这里的颜色**不是硬编码**，而是 @变量@ —— 由 core/theme.py 在加载时替换：
+
+     core/theme.py           定义 dark / light 两套调色板
+     ui/main_window.py       读这个文件 → 替换变量 → setStyleSheet()
+
+   所以：
+   - 加新的样式规则时，颜色一律用 @变量@，不要写 #rrggbb
+     （写死了浅色主题就会漏掉那条规则）
+   - 换主题、改强调色都只动 core/theme.py，这个文件不用改
+   - @ICONS@ 由 main_window.py 替换成图标目录的绝对路径
+
+   变量清单见 core/theme.py 的 DARK / LIGHT 字典，名字是自解释的：
+     bg_window / bg_page / bg_card / bg_control ...   背景层次
+     text / text_dim / text_faint / text_disabled ... 文字层次
+     accent / accent_fill / accent_bg / accent_border 强调色一族
+     warn / danger / pack_*                           语义色
+   ============================================================================ */
+
+QWidget {
+    background-color: @bg_page@;
+    color: @text@;
+    font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei",
+                 "Segoe UI Symbol", "Segoe UI Emoji", sans-serif;
+    font-size: 14px;
+}
+
+/* 见文件顶部说明 1)：不加这条，所有文字都会带一块自己的底色 */
+QLabel {
+    background-color: transparent;
+}
+
+/* 同理：勾选框和单选框自己也是 QWidget，会带上页面底色。
+   放在卡片上时（设置页的"启动游戏后关闭启动器"）就会露出一块深色。 */
+QCheckBox,
+QRadioButton {
+    background-color: transparent;
+}
+
+QMainWindow, #Root {
+    background-color: @bg_window@;
+}
+
+QToolTip {
+    background-color: @bg_control@;
+    color: @text@;
+    border: 1px solid @border_control@;
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+
+/* ============================ 侧边栏 ============================ */
+
+#Sidebar {
+    background-color: @bg_sidebar@;
+    border-right: 1px solid @border@;
+}
+
+#SidebarBrand {
+    color: @accent@;
+    font-size: 16px;
+    font-weight: bold;
+    padding: 0 4px;
+}
+
+#NavButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: left;
+    color: @text_dim@;
+    font-size: 14px;
+}
+#NavButton:hover {
+    background-color: @bg_card@;
+    color: @text@;
+}
+#NavButton:checked {
+    background-color: @bg_elevated@;
+    color: @accent@;
+    font-weight: bold;
+}
+
+#SidebarSectionLabel {
+    color: @text_faint@;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 0 4px;
+}
+
+#SidebarVersion {
+    color: @text_disabled@;
+    font-size: 11px;
+}
+
+/* 侧边栏底部的"当前档案"卡片 */
+#AccountChip {
+    background-color: @bg_card@;
+    border: 1px solid @border@;
+    border-radius: 10px;
+}
+#AccountChip:hover {
+    background-color: @bg_elevated@;
+    border-color: @border_control@;
+}
+#AccountChipName {
+    color: @text@;
+    font-weight: bold;
+    font-size: 13px;
+}
+#AccountChipType {
+    color: @text_faint@;
+    font-size: 11px;
+}
+#AccountAvatar {
+    background-color: @avatar_bg@;
+    color: @accent_text_strong@;
+    border-radius: 16px;
+    font-size: 15px;
+    font-weight: bold;
+}
+
+/* ============================ 页面通用 ============================ */
+
+#PageTitle {
+    color: @text_bright@;
+    font-size: 24px;
+    font-weight: bold;
+}
+
+#PageSubtitle {
+    color: @text_faint@;
+    font-size: 13px;
+}
+
+#SectionTitle {
+    color: @text@;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+#FieldLabel {
+    color: @text_dim@;
+    font-size: 13px;
+}
+
+#HintText {
+    color: @text_faint@;
+    font-size: 12px;
+}
+
+#EmptyState {
+    color: @text_faint@;
+    font-size: 13px;
+}
+
+/* 卡片 */
+#Card {
+    background-color: @bg_card@;
+    border: 1px solid @border@;
+    border-radius: 12px;
+}
+
