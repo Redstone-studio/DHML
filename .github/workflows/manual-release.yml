@@ -99,7 +99,7 @@ jobs:
 
       # exe 的「属性 → 详细信息」里显示的版本号/产品名来自这个文件。
       # 用发版输入的那个 tag 生成，这样属性里显示的就是 GitHub 上那个版本号。
-            - name: 生成版本信息
+      - name: 生成版本信息
         env:
           PYTHONIOENCODING: utf-8
         run: python tools/make_version_info.py version_info.txt --version "${{ inputs.version }}"
