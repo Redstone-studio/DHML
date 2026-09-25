@@ -1,7 +1,21 @@
 name: Experimental - Onefile Build
 
+# ⚠️ 2026-09 起，**正式发版（manual-release.yml / release.yml）已经同时挂**
+#    zip（onedir）+ 单文件 exe 了，所以这个 workflow 现在只是"想单独出一个
+#    单文件、又不发 Release"时的备用手段。留着不碍事，也可以删掉。
+#
+# 为什么单文件要谨慎：PyInstaller 的 onefile 是"每次启动都把自己解包到
+# %TEMP%\_MEIxxxx 再运行"，所以**每次**启动都有解包开销（PyQt6 这种大依赖
+# 冷启动 5~10 秒，靠系统文件缓存才降到 1~2 秒），崩溃时还会残留临时目录。
+# 要"开得快"就用 onedir。
+
 on:
   workflow_dispatch:   # 只手动触发
+    inputs:
+      version:
+        description: '版本号（写进 exe 属性里，如 v1.0.0）'
+        required: true
+        default: 'v1.0.0'
 
 jobs:
   build:
@@ -18,9 +32,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install PyQt6 pyinstaller
 
-      # 单文件打包
+      # exe 的「属性 → 详细信息」里显示的版本号/产品名来自这个文件
+      - name: 生成版本信息
+        run: python tools/make_version_info.py version_info.txt --version "${{ inputs.version }}"
+
+      # 单文件打包。名字跟正式版保持一致（原来叫 MCLuncher，是改名前的旧名字）。
+      # ⚠️ windows 默认 shell 是 pwsh，`^` 不是续行符，必须写成单行。
       - name: Build (onefile)
-        run: pyinstaller --noconfirm --windowed --onefile --name MCLuncher --add-data "assets;assets" main.py
+        run: pyinstaller --noconfirm --windowed --onefile --name Mosslight-Launcher --icon assets/icons/icon512.ico --version-file version_info.txt --add-data "assets;assets" --runtime-tmpdir=. main.py
 
       - name: Show dist content
         run: dir dist
@@ -28,6 +47,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MCLuncher-onefile-${{ github.run_number }}
-          path: dist/MCLuncher.exe
+          name: Mosslight-Launcher-onefile-${{ github.run_number }}
+          path: dist/Mosslight-Launcher.exe
           retention-days: 7

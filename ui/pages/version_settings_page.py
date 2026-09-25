@@ -46,8 +46,11 @@ TAB_MODS = 1
 # 又不会让输入框离得太远"的那个数。
 LABEL_WIDTH = 140
 
-# 「自定义信息」在游戏里就是 ${version_type}，也就是 F3 界面和窗口标题里
-# 那个版本类型标记。PCL 里叫"自定义信息"。
+# 「自定义信息」在游戏里就是 `${version_type}`：1.20.4 的主界面那行是
+# `"Minecraft " + 版本名 + (type == "release" ? "" : "/" + type)`，
+# 所以它显示在**主界面左下角**（不是 F3 —— F3 显示的是 `--version` 和客户端品牌）。
+# 留空时由 `core/branding.launch_brand()` 自动填「启动器名/加载器（N 个模组）」。
+# PCL 里这个设置叫「版本信息」/「自定义信息」。
 CUSTOM_INFO_HINT_MAX = 32
 
 
@@ -261,8 +264,9 @@ class VersionSettingsPage(TranslatableWidget):
         row.addStretch()
         box.addLayout(row)
         box.addWidget(self.label(
-            "游戏里 F3 显示的版本类型（启动参数里的 ${version_type}）。"
-            "留空就用版本 JSON 自带的那个。", "HintText"))
+            "游戏主界面那行字里「斜杠后面」那段（启动参数里的 ${version_type}）。"
+            "留空就自动填「启动器名/加载器（N 个模组）」，填 release 就不显示。",
+            "HintText"))
 
         # Java（真）
         row = self._field_row("Java")

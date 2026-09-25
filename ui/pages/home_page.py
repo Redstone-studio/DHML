@@ -512,8 +512,14 @@ class HomePage(TranslatableWidget):
             extra_jvm_args=effective["extra_jvm_args"],
             extra_game_args=effective.get("extra_game_args", ""),
             server_address=effective.get("server_address", ""),
-            # 自定义信息就是 ${version_type}：留空时 resolve 里会退回 JSON 的 type
+            # 自定义信息就是 ${version_type}（游戏主界面那行里唯一由启动器控制的部分）。
+            # ⚠️ **用户没填时不要在这里补默认值**：留空交给 `build_launch_plan()`，
+            # 它会拼一份品牌默认值（`Mosslight/Fabric`）—— 品牌那件事只在一处做，
+            # 免得以后改默认值要满仓库找。
             version_type=effective.get("custom_info", ""),
+            # 品牌默认值要用到这两样（JSON 里都没有，是扫描器算出来的）
+            loader_label=version.get("loader_label", "") or "",
+            isolated=version.get("isolated"),
             launcher_name=APP_NAME,
             launcher_version=APP_VERSION,
             # 让游戏首次启动的默认语言跟着系统走
@@ -577,6 +583,14 @@ class HomePage(TranslatableWidget):
 
         for warning in plan.warnings:
             self.append_log(LOG_PREFIX + "⚠ " + warning)
+
+        # ⚠️ **把这件事写进日志**：`游戏里为什么不显示品牌` 这类问题，光看日志
+        # 原来是一点线索都没有的 —— 游戏那边只打印版本号（`Loading Minecraft 1.20.1`，
+        # 那是 version.json 的 `id`，我们不动它），而 `--versionType` 是我们传的、
+        # 以前又没打出来。用户 2026-09 就是这么问上来的。
+        self.append_log(LOG_PREFIX + tr(
+            "版本信息（游戏主界面斜杠后面那段）：{text}", text=plan.version_type))
+        self.append_log(LOG_PREFIX + tr("启动参数：{cmd}", cmd=plan.describe()))
 
         if plan.missing_libraries:
             self.append_log(LOG_PREFIX + tr(

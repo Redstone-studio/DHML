@@ -25,31 +25,51 @@ jobs:
           python -m pip install --upgrade pip
           pip install PyQt6 pyinstaller
 
-      - name: Build exe
-        run: |
-          pyinstaller --noconfirm --windowed --name MCLuncher ^
-            --add-data "assets;assets" ^
-            main.py
+      # exe 的「属性 → 详细信息」里显示的版本号/产品名来自这个文件。
+      # 这里用触发的那个 tag（模型里传死值会跟 tag 对不上）。
+      - name: 生成版本信息
+        run: python tools/make_version_info.py version_info.txt --version "${{ github.ref_name }}"
+
+      # 注意：windows-latest 的默认 shell 是 pwsh，`^` 在 PowerShell 里不是续行符
+      # （那是 cmd.exe 的转义字符）。写成多行会让 pyinstaller 丢参数、
+      # 并把 main.py 当成一条独立命令执行，构建必然失败。必须单行。
+      - name: Build exe (onedir)
+        run: pyinstaller --noconfirm --windowed --name Mosslight-Launcher --icon assets/icons/icon512.ico --version-file version_info.txt --add-data "assets;assets" main.py
+
+      # 单文件版：给"就要一个 exe"的人。⚠️ 代价是每次启动都要解包
+      # （冷启动 5~10 秒，之后靠文件缓存才 1~2 秒）。
+      # --runtime-tmpdir=. 让它解在**启动器所在目录**而不是 %TEMP%（学 PCL 那种
+      # "文件都在自己旁边"）；用 `.` 是因为 PyInstaller 不会创建父目录，
+      # 指定一个不存在的目录名会直接起不来。详见 manual-release.yml 里的说明。
+      - name: Build exe (onefile)
+        run: pyinstaller --noconfirm --windowed --onefile --name Mosslight-Launcher --icon assets/icons/icon512.ico --version-file version_info.txt --add-data "assets;assets" --runtime-tmpdir=. --distpath dist-onefile --workpath build-onefile main.py
 
       - name: Zip artifact
         run: |
-          Compress-Archive -Path dist/MCLuncher/* -DestinationPath MCLuncher-${{ github.ref_name }}-win64.zip
+          Compress-Archive -Path dist/Mosslight-Launcher/* -DestinationPath Mosslight-Launcher-${{ github.ref_name }}-win64.zip
+          Rename-Item dist-onefile/Mosslight-Launcher.exe Mosslight-Launcher-${{ github.ref_name }}-onefile.exe
 
       - name: Create Release & Upload
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "MC Launcher ${{ github.ref_name }}"
+          name: "Mosslight Launcher ${{ github.ref_name }}"
           body: |
-            ## 🎮 MC Launcher ${{ github.ref_name }}
+            ## 🎮 Mosslight Launcher ${{ github.ref_name }}
 
             自动构建于 ${{ github.event.head_commit.timestamp }}
 
             ### 下载
-            - **Windows x64**: `MCLuncher-${{ github.ref_name }}-win64.zip`
+            - **推荐**：`Mosslight-Launcher-${{ github.ref_name }}-win64.zip`
+              —— 解压后双击 `Mosslight-Launcher.exe`。启动最快（每次约 1 秒）
+            - 单文件：`Mosslight-Launcher-${{ github.ref_name }}-onefile.exe`
+              —— 只有一个 exe，但**每次启动都要先把自己解包到临时目录**，
+              冷启动要等几秒
 
             ### 说明
-            解压后双击 `MCLuncher.exe` 运行。
-          files: MCLuncher-${{ github.ref_name }}-win64.zip
+            两种内容一样，按喜好挑一个就行。
+          files: |
+            Mosslight-Launcher-${{ github.ref_name }}-win64.zip
+            dist-onefile/Mosslight-Launcher-${{ github.ref_name }}-onefile.exe
           draft: false
           prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}

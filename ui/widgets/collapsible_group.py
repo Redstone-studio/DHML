@@ -22,7 +22,7 @@
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+    QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 )
 
 from core.i18n import tr
@@ -56,6 +56,13 @@ class RemoteVersionRow(QFrame):
         # 这行是分组里的第几个（父控件回填，用它反查"选中的是哪一行"）
         self.item_index = -1
         self._picked = False
+        # 行高是"图标 + 两行字"定死的：竖向给 Fixed，既不许被压扁、也不许被拉高。
+        # ⚠️ 内容比视口高的时候，`QScrollArea` 本来就会滚动（容器拿到的是
+        # `sizeHint` 而不是视口高度），所以正常情况下轮不到布局去挤它们；
+        # 但**折叠组也能脱离滚动区单独用**（模组页就那么用），
+        # 那时候布局是真的会挤 —— 给 Fixed 最省心。
+        self.setSizePolicy(QSizePolicy.Policy.Preferred,
+                           QSizePolicy.Policy.Fixed)
         # ⚠️ 一开始就把 property 置上（不是等 set_picked() 时才置）：
         # QSS 那边读不到属性时值是 None，虽然也不匹配 `[picked="true"]`，
         # 但"有的行有属性、有的行没有"排查起来很烦
@@ -127,7 +134,7 @@ class CollapsibleGroup(TranslatableWidget):
         item_clicked(entry)     点了一行（页面据此进第二页）
         item_activated(entry, i) 点了一行，带上它是第几个 —— 安装选项页用它
                                  判"用户选中了哪个加载器"（见 install_options）
-        header_clicked()        **锁着的时候**点了标题条（见 `set_locked`）
+        action_triggered()      点了标题右边那个小按钮（见 `set_action`）
         expanded_changed(bool)  展开状态变了（页面可以按需拉数据）
     """
 
@@ -136,8 +143,8 @@ class CollapsibleGroup(TranslatableWidget):
     # 用户在某一行上**点了一下**（`(这行的数据, 第几个)`）—— 父控件拿它判
     # "用户选中了哪个加载器"，用来锁掉其他加载器（见 install_options）
     item_activated = pyqtSignal(object, int)
-    # 锁定态下点了标题：不是"展开"，而是"我要改用这个"（见 `_on_header_click`）
-    header_clicked = pyqtSignal()
+    # 标题右边那个小按钮（可选，见 `set_action`）：安装选项页用它做「取消选择」
+    action_triggered = pyqtSignal()
 
     def __init__(self, title: str, expanded: bool = False, parent=None):
         super().__init__(parent)
@@ -147,6 +154,10 @@ class CollapsibleGroup(TranslatableWidget):
         self._row_widgets = []      # 已经建出来的行控件（标"已选"要用）
         self._expanded = False
         self._dpr = screen_dpr(self)
+        # 入场动画（移植自实验项目的 slide_in）：每一页的行依次滑入。
+        # 懒建 —— 只有真的建行时才去读设置、造调度器（见 `_stagger_for_rows`）
+        self._stagger = None
+        self._row_hosts = []        # 包着行的 SlideInRow（clear 时要停掉它们的动画）
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -170,8 +181,17 @@ class CollapsibleGroup(TranslatableWidget):
         self.header_btn.setObjectName("CollapsibleHeaderButton")
         self.header_btn.setCheckable(True)
         self.header_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.header_btn.clicked.connect(self._on_header_click)
+        self.header_btn.clicked.connect(self.toggle)
         header_row.addWidget(self.header_btn, 1)
+
+        # 标题右侧的**小动作按钮**（可选）：安装选项页用它做「取消选择」。
+        # ⚠️ 它是 header_btn 的兄弟、不是子控件，所以点它不会连带触发展开/收起。
+        self.action_btn = QPushButton()
+        self.action_btn.setObjectName("CollapsibleAction")
+        self.action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.action_btn.setVisible(False)
+        self.action_btn.clicked.connect(self.action_triggered.emit)
+        header_row.addWidget(self.action_btn, 0)
 
         # 标题文字画在按钮上（`_refresh_header` 里 setText）；
         # 副标题单独一个 QLabel，右对齐
@@ -200,7 +220,9 @@ class CollapsibleGroup(TranslatableWidget):
         self.body.setObjectName("CollapsibleBody")
         self.body_box = QVBoxLayout(self.body)
         self.body_box.setContentsMargins(6, 2, 6, 8)
-        self.body_box.setSpacing(1)
+        # ⚠️ 行现在自己有一块底色（见 30-badges.qss 的 #RemoteVersionRow），
+        # 挨着排会糊成一大坨，所以要留出行缝。以前行是扁平的，spacing=1 才对。
+        self.body_box.setSpacing(6)
         outer.addWidget(self.body)
 
         self.empty_hint = QLabel()
@@ -242,18 +264,6 @@ class CollapsibleGroup(TranslatableWidget):
     def toggle(self):
         self.set_expanded(not self._expanded)
 
-    def _on_header_click(self):
-        """点了标题条：锁着的时候发 `header_clicked`，否则就是普通的展开/收起
-
-        ⚠️ **锁死 ≠ 死路**（用户 2026-09 定的）：灰掉的那几组点标题=
-        "我要改成这个加载器"，由父控件去换选择。所以锁着时按钮**不禁用**，
-        只是不再展开 —— 禁用的话用户点错一次就得返回重来。
-        """
-        if self._locked:
-            self.header_clicked.emit()
-            return
-        self.toggle()
-
     def set_expanded(self, expanded: bool):
         expanded = bool(expanded)
         # ⚠️ 这里**不能**用 self.body.isVisible() 做判断：父窗口还没显示时它
@@ -278,6 +288,16 @@ class CollapsibleGroup(TranslatableWidget):
 
     def _clear_rows(self):
         """删掉所有已建的行（保留 empty_hint / more_btn）"""
+        # ⚠️ 先叫停入场动画：那些 SlideInRow 的动画还在跑，而它们的子控件
+        # 马上就要 deleteLater 了 —— 不停的话动画会打在已删除的控件上
+        if self._stagger is not None:
+            self._stagger.clear()
+        for host in self._row_hosts:
+            try:
+                host.stop()
+            except RuntimeError:            # 控件已经没了
+                pass
+        self._row_hosts = []
         for i in reversed(range(self.body_box.count())):
             item = self.body_box.itemAt(i)
             widget = item.widget()
@@ -289,11 +309,41 @@ class CollapsibleGroup(TranslatableWidget):
         # deleteLater 掉的控件（"wrapped C/C++ object has been deleted"）
         self._row_widgets = []
 
+    def _stagger_for_rows(self):
+        """这一组行用的入场动画调度器（读设置里的动效风格 + 速度）
+
+        ⚠️ 每次铺新页时**重新读一次设置**（用户刚在设置里换了风格就该生效），
+        所以这里不用缓存。认不出/关了也不报错 —— `core.anim_prefs` 会退回默认。
+        """
+        from core import anim_prefs, appearance
+        from ui.widgets.slide_in import StaggerReveal
+
+        try:
+            base = anim_prefs.preset_for_versions(appearance.get_preset_key())
+            speed = anim_prefs.speed_factor(appearance.get_speed_key())
+            preset = anim_prefs.scaled(base, speed)
+        except Exception:                                   # noqa: BLE001
+            preset = anim_prefs.preset_for_versions(anim_prefs.DEFAULT_PRESET)
+        return StaggerReveal(
+            self, interval=preset.interval, initial_offset=preset.offset,
+            direction=preset.direction, style=preset.style,
+            duration=preset.duration, overshoot=preset.overshoot,
+            bounce_ratio=preset.bounce_ratio, ease=preset.ease)
+
     def _build_page(self):
         """再建一页行（PAGE_SIZE 个）"""
         if not self._items:
             return
+        from core import appearance
+
+        # 动效总开关：关掉时**连 SlideInRow 那层都不包** —— 不是"动画时长为 0"，
+        # 而是根本不存在这个控件（少一个 widget、少一个定时器、少一次离屏合成）。
+        # 用户要的"关闭动效省性能"就应该省在这儿。
+        use_anim = appearance.get_anim_enabled()
         end = min(len(self._items), self._built + PAGE_SIZE)
+        if use_anim and self._stagger is None:
+            self._stagger = self._stagger_for_rows()
+        added = []
         for entry in self._items[self._built:end]:
             index = self._built
             row = RemoteVersionRow(entry, self._dpr)
@@ -302,10 +352,21 @@ class CollapsibleGroup(TranslatableWidget):
             # 带序号的另一份（安装选项页靠它记住"选的是第几个版本"）
             row.clicked.connect(
                 lambda _e, e=entry, i=index: self.item_activated.emit(e, i))
+            # 包一层 SlideInRow 才能滑入（见 ui/widgets/slide_in.py：
+            # 偏移是靠**这一层直接 move 孩子**做的，有布局的话会被布局抹掉）
+            if use_anim:
+                host = self._stagger.add(row)
+                self._row_hosts.append(host)
+            else:
+                host = row                 # 关掉动效：行本身就是这一层
+            added.append(host)
             # 插在 empty_hint 之后、more_btn 之前
-            self.body_box.insertWidget(self.body_box.indexOf(self.more_btn), row)
-            self._row_widgets.append(row)
+            self.body_box.insertWidget(self.body_box.indexOf(self.more_btn), host)
+            self._row_widgets.append(row)       # ⚠️ 记的还是**行本身**（标已选要用）
             self._built += 1
+        # 依次点名滑入（`start()` 里会自己点第一个）
+        if added and use_anim:
+            self._stagger.start()
         self._refresh_footer()
 
     def load_more(self):
@@ -361,17 +422,21 @@ class CollapsibleGroup(TranslatableWidget):
     # ---------- 锁定 ----------
 
     def set_locked(self, locked: bool, note: str = "", tooltip: str = ""):
-        """把这个分组标成"现在不是它"（灰掉、收起来、副标题说清为什么）
+        """把这个分组锁死/解锁（「选了 Forge 就不能再选别的」就靠它）
 
-        「选了 Forge 就不能同时选 Fabric」就靠它，外观由 QSS 的
-        `[locked="true"]` 负责。
-        ⚠️ **锁着不等于点不动**：标题按钮**不禁用**，点它会发 `header_clicked`
-        （父控件据此改选），只是不再展开 —— 见 `_on_header_click`。
-        `note` / `tooltip` 顺手把"为什么灰"和"点一下会怎样"写清楚。
+        锁上之后：灰掉、收起来、标题**点不动**（按钮禁用）、副标题换成
+        「与 X 不兼容」。用户 2026-09 明确要求这个手感：
+        **选了之后就点不动其他的了**（第一版做的是"点一下灰卡片就改选"，
+        用户说那样"还是能点其他的"，不行）。
+        ⚠️ 所以"想换一个"必须另给一个**明确的**入口 —— 见 `set_action()`
+        （安装选项页在选中的那组上放「取消选择」），别把退路藏在灰卡片上：
+        藏在灰卡片上的话，用户想"展开看看里面有什么"就会**静悄悄把加载器换掉**。
+        `note` / `tooltip` 顺手把"为什么灰"和"要换该怎么办"写清楚。
         """
         locked = bool(locked)
         if self._locked != locked:
             self._locked = locked
+            self.header_btn.setEnabled(not locked)
             # 锁上时把它收起来（留着展开的话视觉上像"还能选"）
             if locked and self._expanded:
                 self.set_expanded(False)
@@ -404,6 +469,20 @@ class CollapsibleGroup(TranslatableWidget):
 
     def is_selected(self) -> bool:
         return self._selected
+
+    def set_action(self, text: str = "", tooltip: str = ""):
+        """标题右边的那个小按钮（空串 = 收起来不占位）
+
+        用途：给"锁死"配一个**明确**的退路。安装选项页在选中的那组上放
+        「取消选择」—— 点了就解除互斥，可以重新挑一个加载器。
+        """
+        text = (text or "").strip()
+        self.action_btn.setText(text)
+        self.action_btn.setToolTip(tooltip or "")
+        self.action_btn.setVisible(bool(text))
+
+    def action_text(self) -> str:
+        return self.action_btn.text() if self.action_btn.isVisibleTo(self) else ""
 
     def _refresh_header(self):
         arrow = "\u25be" if self._expanded else "\u25b8"      # ▾ / ▸

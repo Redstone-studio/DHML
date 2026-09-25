@@ -48,12 +48,13 @@
 跨线程只读一份 `snapshot()` 是最稳的：不用管信号排队，也不怕线程比窗口先死。
 """
 
+import queue
 import time
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton, QScrollArea,
-    QVBoxLayout, QWidget
+    QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QProgressBar, QPushButton,
+    QScrollArea, QVBoxLayout, QWidget
 )
 
 from core import download as dl
@@ -63,6 +64,10 @@ from core.i18n import tr
 POLL_MS = 200
 MAX_ROWS = 12          # 只显示这么多行（几百个库全铺出来没意义，也卡）
 LEFT_WIDTH = 132       # 左边读数那一列的宽度（跟实验版一致）
+# 安装器输出最多留这么多行（Forge 能刷 3 万行，全留着这窗口就废了）
+MAX_STAGE_LINES = 400
+# 一次刷新最多往控制台塞这么多行（安装器吐得太快时别把界面卡住）
+STAGE_DRAIN = 40
 # 下完的行再留这么久才从列表里撤掉（秒）。
 # 为什么要留：749 个资源文件是一批批下完的，下完立刻撤会让列表"一阵一阵地空"，
 # 看着像界面坏了；留一下能看见"这个刚完成"。
@@ -193,6 +198,10 @@ class DownloadWindow(QWidget):
         self._done_at = {}          # id(任务) → 第一次看到它"下完"的时刻（缓冲用）
         self._retry_note = 0        # 点了重试、还没开始下的那个提示（见 _refresh_subtitle）
         self._more_label = None
+        # ---- 「下载完了还要跑安装器」那一段（见 stage_begin / stage_write）----
+        self._stage_note = ""       # 当前阶段说明（后台线程只写字符串，主线程读）
+        self._stage_busy = False    # 后台还在跑安装器 → 定时器**别停**
+        self._stage_queue = queue.Queue()
 
         self.setObjectName("DownloadWindow")
         self.setWindowTitle(title or tr("下载中"))
@@ -254,6 +263,16 @@ class DownloadWindow(QWidget):
 
         outer.addLayout(middle, 1)
 
+        # ---------- 安装器控制台（只有要跑安装器时才出现）----------
+        # ⚠️ 一上来就 `hide()`：不隐藏的话，纯下载的那些安装（原版 / Fabric）
+        # 底下会白挂一块空黑框。隐藏的控件不参与布局，所以对现有观感零影响。
+        self.console = QPlainTextEdit()
+        self.console.setObjectName("DownloadConsole")
+        self.console.setReadOnly(True)
+        self.console.setMaximumBlockCount(MAX_STAGE_LINES)
+        self.console.hide()
+        outer.addWidget(self.console, 1)
+
         # ---------- 底部：保存路径 + 按钮 ----------
         bottom = QHBoxLayout()
         bottom.setSpacing(8)
@@ -293,6 +312,54 @@ class DownloadWindow(QWidget):
         self._timer.start()
         self.refresh()
 
+    # ---------- 安装器阶段（下载完之后那 3 分钟）----------
+    #
+    # ⚠️ 这三个方法是**给后台线程调的**（`_install_worker`）。规矩：只写
+    # 普通属性 / 往 queue 里塞，**绝不碰控件** —— Qt 控件只能在主线程动，
+    # 后台直接 setText 就是随机崩。真正更新界面的是主线程的 refresh()。
+
+    def stage_begin(self, note: str):
+        """进入「跑安装器」阶段：进度条切成"不知道还要多久"的忙等态"""
+        self._stage_note = str(note or "")
+        self._stage_busy = True
+
+    def stage_write(self, line: str):
+        """后台线程把安装器的一行输出丢进来（主线程 refresh 时消费）"""
+        self._stage_queue.put(str(line or ""))
+
+    def stage_note(self, note: str):
+        """只换阶段说明，不改忙等状态（比如"正在校验…"）"""
+        self._stage_note = str(note or "")
+
+    def stage_end(self, note: str = ""):
+        """安装器跑完了：收掉忙等态（定时器可以正常停了）"""
+        if note:
+            self._stage_note = str(note)
+
+    def _stage_sync(self, snap):
+        """主线程：把后台塞进来的安装器输出搬到控制台上（顺手切忙等进度条）"""
+        if self._stage_busy:
+            # 下载已经完了，但这事还没完 —— 定时器不能停（见 refresh）
+            self.console.show()
+            # 进度条切成 Qt 的"忙等"动画（0,0 = 一直滚），比卡在 100% 强
+            self.total_bar.setRange(0, 0)
+            self.v_speed.setText("—")
+            self.v_left.setText("—")
+            if self._stage_note:
+                self.subtitle.setText(self._stage_note)
+        elif self._stage_note and self.console.isVisible():
+            self.subtitle.setText(self._stage_note)
+
+        lines = []
+        while len(lines) < STAGE_DRAIN:
+            try:
+                lines.append(self._stage_queue.get_nowait())
+            except queue.Empty:
+                break
+        if lines:
+            self.console.show()
+            self.console.appendPlainText("\n".join(lines))
+
     # ---------- 刷新 ----------
 
     def refresh(self):
@@ -304,10 +371,15 @@ class DownloadWindow(QWidget):
         self._refresh_subtitle(snap)
         self._refresh_footer(snap)
         self._refresh_retry_btn(snap)
-        if snap["finished"] and not self._in_grace():
+        self._stage_sync(snap)
+        if (snap["finished"] and not self._in_grace()
+                and not self._stage_busy and self._stage_queue.empty()):
             # 全下完、而且"刚完成"那几行也撤干净了，才停定时器。
             # ⚠️ 不能只判 finished：那会儿完成的行还在缓冲期里，
             # 一停定时器它们就再也没人负责撤掉，会永远挂在列表上。
+            # ⚠️ 也**不能在有安装器阶段时停**：Forge 装一次三分钟，
+            # 停了定时器那些进度行就再也没人往控制台上搬了。
+            # ⚠️ 队列没搬空也不能停，否则最后几行安装器输出会卡在队列里没人管。
             self._timer.stop()
 
     def _sync_rows(self, snap):

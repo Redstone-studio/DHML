@@ -3,10 +3,11 @@
     [←]  ▣ [ 26.3                    ]        ← 版本名可改（默认 = 版本 id）
     ──────────────────────────────────────
     ▸ Forge      最新版 66.0.3                ← core/loaders.loader_rows()
-    ▸ NeoForge   还没做
+    ▸ NeoForge   最新版 21.1.72                  **一进来全是收起的**
     ▸ Fabric     最新版 0.19.5
-    ▸ OptiFine   还没做
+    ▸ OptiFine   最新版 HD_U_I5
     ──────────────────────────────────────
+        还没选加载器 —— 直接点「开始下载」只会装原版
             [ ⤓ 开始下载 ]
 
 设计要点：
@@ -16,18 +17,38 @@
   行图标由 `version_pixmap` 按 `loader` 字段自动挑（forge.png / fabric.png…）
 - 三种状态照实说（见 core/loaders.py）：能装 → 最新版 + 版本列表；
   我们没做 → 「还没做」；拉不到 → 「拉不到」+ 原因。**后两者绝不混**
-- 「开始下载」发 `install_requested`，参数里带上**用户改过的名字**；
-  真正安装是下一步（E）的事
+- 「开始下载」发 `install_requested`，参数里带上**用户改过的名字**、
+  选中的加载器、以及**安装器要的额外数据**（`loader_extra`：OptiFine 的
+  type/patch，见 `loader_extra()`）；真正安装是 `DownloadPage._install_worker`
+  的事 —— Forge / NeoForge / OptiFine 那几家下完还要**跑官方安装器**
+  （`core/loader_setup.py`），跑的时候进度走下载窗口下半截那个控制台
+
+加载器是**可选的、而且不预选**（用户 2026-09 定的："让用户自己选择，
+不展开任何选项"）：
+
+- 一进来五组**全是收起的**，也没有任何一组被"默认选中"
+- **一个都不点 = 只装原版**（`selected_loader()` 返回 `("", "")`）。
+  以前是"什么都不点就装第一个能装的（Forge）"—— 那是替用户做主，
+  而且界面上看不出来。现在按钮上方会明说
+  「还没选加载器 —— 直接点「开始下载」只会装原版」（`_refresh_hint()`）
+- 想装加载器就自己展开一家、点里面一个版本
 
 加载器互斥（用户 2026-09 定的，跟 PCL 一个手感）：
 
-- 同时**只能选一个**加载器。点某一行 = 选中它，其他几组**灰掉 + 收起来**，
-  副标题写「与 Fabric 不兼容」
-- 但**锁死 ≠ 死路**：点灰掉那组的标题 = 改选它（取它的最新版），
-  不用退回上一页重来
-- 选中的那组描边亮起、副标题写「已选 0.19.5（共 253 个）」、里面那一行标出来
+- 同时**只能选一个**加载器。点某一行 = 选中它，其他几组**灰掉 + 收起来**、
+  标题**点不动**、副标题写「与 Fabric 不兼容」
+- 要换只能先点选中那组右边的「**取消选择**」（`clear_selection()`）——
+  这是刻意的（用户 2026-09 明确要求"选了之后就点不动其他的了"）。
+  ⚠️ 别把退路做在灰卡片上：那样用户想"展开看看"就会**静悄悄把加载器换掉**
+- 选中的那组描边亮起、副标题写「已选 0.19.5（共 253 个）」、里面那一行标出来，
+  **顶部的图标也从草方块换成对应加载器的图**
 - 版本名自动填成 `26.3-Fabric 0.19.5`（`core/loaders.version_folder_name()`）；
   **用户手改过就不再自动填**（别冲掉他写的）
+- **选了 Fabric** 才会多出一组「Fabric API」（Modrinth 上的那个 mod）：
+  默认装匹配当前游戏版本的最新版，可以改选别版、也可以点「不装」。
+  它跟加载器**不是互斥关系**，所以它不在 `self._groups` 里
+  （进去的话选中它会把 Fabric 锁掉）。装的时候走**版本隔离**的
+  `versions/<版本名>/mods/`
 """
 
 from pathlib import Path
@@ -59,6 +80,10 @@ class InstallOptions(TranslatableWidget):
 
     back_requested = pyqtSignal()
     install_requested = pyqtSignal(dict)
+    # 选了 Fabric、但手上还没有 Fabric API 的候选版本 → 页面据此去拉
+    # （参数是游戏版本）。**不在这里自己联网**：这一层是纯界面，
+    # 而且"只有选了 Fabric 才值得拉"这件事得让页面知道
+    api_wanted = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -74,6 +99,14 @@ class InstallOptions(TranslatableWidget):
         self._picked_index = -1
         # 用户手改过名字没有 —— 改过就**不再自动填**（别冲掉他写的）
         self.name_edited = False
+
+        # Fabric API（Modrinth 上的那个 mod）。**只有选了 Fabric 才有意义** ——
+        # 别的加载器装它纯属添乱（见 `_refresh_api_group`）
+        self._api_versions = []      # `core/loader_install.fabric_api_versions()` 的结果
+        self._api_group = None       # 那个折叠组（换一批加载器行时重建）
+        self._api_picked = None      # 选中的是第几个（None = 还没定 → 用最新的）
+        self._api_off = False        # 用户点了「不装 Fabric API」
+        self._api_asked_mc = ""      # 已经为哪个游戏版本要过数据了（别重复要）
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -168,9 +201,17 @@ class InstallOptions(TranslatableWidget):
         # 换了远程版本 → 之前"手改过名字"作废：新版本的默认名还是版本 id，
         # 用户选加载器时该自动填（不重置的话他会拿到上一个版本的旧名字）
         self.name_edited = False
-        pix = version_pixmap(self._entry, ICON_SIZE, self._dpr)
-        self.icon.setPixmap(pix) if pix is not None else self.icon.clear()
+        # 换了远程版本 → "为哪个游戏版本要过 Fabric API 数据"也要跟着换，
+        # ⚠️ 手上的**旧数据也要扔掉**：它是按上一个游戏版本筛出来的，
+        # 留着的话换个游戏版本再选 Fabric 会装上一个不匹配的 Fabric API
+        self._api_asked_mc = ""
+        self._api_versions = []
+        self._api_picked = None
+        self._api_off = False
         self.set_rows([])                    # 换版本先把旧的加载器清掉
+        # ⚠️ 图标要放在 `set_rows([])` **之后**刷：那一步会把 `_picked` 清掉，
+        # 顺序反了会用上一个版本选中的加载器画图标
+        self._refresh_icon()
 
     def set_rows(self, rows):
         """铺加载器那几行（`core/loaders.loader_rows()` 的结果）
@@ -194,13 +235,10 @@ class InstallOptions(TranslatableWidget):
 
         self.loading.hide_now()
 
-        # 一进来只展开**第一个**能装的加载器（用户多半就是来装它的）。
-        # ⚠️ 别把每个能装的都展开：五家都"能装"的时候全展开 = 一上来就
-        # 5×50 行版本（几百个控件 + 几百张图标），页面又长又慢，
-        # 而且跟"同时只能选一个"这件事自相矛盾（见 `_apply_selection`）。
-        first_ok = next((r.get("key") for r in self._rows
-                         if r.get("state") == "ok" and r.get("versions")), "")
-
+        # ⚠️ **一进来一组都不展开**（用户 2026-09 定的）。
+        # 原来是把第一个能装的（Forge）自动展开 —— 那等于替用户做主：
+        # 他什么都没点就按「开始下载」，装出来的是 Forge。现在全都收着，
+        # 想让用户自己点一个；一个都不点就装纯原版（见 `selected_loader`）。
         for row in self._rows:
             # 一行 = **一个带框的折叠组**，状态那句话说在框里面（副标题）。
             # ⚠️ 以前是"框外一行状态文字 + 框"两行，看着散（用户 2026-09 提的）；
@@ -210,19 +248,18 @@ class InstallOptions(TranslatableWidget):
             group.set_note(self._status_text(row))
             group.set_items([self._version_entry(row, v)
                              for v in row.get("versions", [])])
-            if key == first_ok:
-                group.set_expanded(True)
             # 用户点里面某个版本 → 就算"选了这个加载器"，其他组要锁掉
             group.item_activated.connect(
                 lambda entry, idx, k=key: self.on_item_clicked(k, entry, idx))
-            # 点灰掉那组的标题 = 改选它（锁死 ≠ 死路，用户 2026-09 定的）
-            group.header_clicked.connect(
-                lambda k=key: self.switch_to(k))
+            # 选中那组标题右边的「取消选择」（锁死之后唯一"想换一个"的入口）
+            group.action_triggered.connect(self.clear_selection)
             # 给测试/以后取用：状态文字现在在组自己的副标题上
             group.status_label = group.header_note
             self._groups[key] = group
             self._loader_box.insertWidget(self._loader_box.count() - 1, group)
 
+        # Fabric API 那一组（只有选了 Fabric 才会显示出来）
+        self._make_api_group()
         # 铺完一遍：按当前"选中"状态刷一次锁/副标题/标记
         self._apply_selection()
 
@@ -268,14 +305,17 @@ class InstallOptions(TranslatableWidget):
     def on_item_clicked(self, key: str, entry, index: int = -1):
         """用户点了某个加载器里的一个版本 → 选中它、锁掉其他
 
-        ⚠️ 这个方法名是**故意的**（"on_" 开头）—— 页面那边会扫
-        `dir(page)` 找 `on_*` 方法来接信号。别改名。
-        ⚠️ 已经选过别的加载器之后，点**别的组里的行**会**改选过去**
-        （`_apply_selection` 会把原来那组锁上）—— 同时只能选一个，
-        但永远有退路；改选那条路平时走的是 `switch_to()`（灰掉那组
-        根本展不开，所以它的行也点不到）。
+        ⚠️ 这个方法名是**习惯**（"on_" 开头，跟页面里其它回调一致）——
+        信号其实是在 `set_rows()` 里显式 connect 的，没有谁在扫 `dir(page)`。
+        ⚠️ 锁掉之后另外几组是**真的点不动**（标题禁用 + 组收起来 + 这里再挡一层），
+        想换只能先 `clear_selection()`。
         """
         if not key or not isinstance(entry, dict):
+            return
+        # ⚠️ 锁着的那几组：它们的行**还在**（只是折叠起来看不见）。界面本来
+        # 就点不到（标题按钮禁用了、组也收起来了），这一句是兜底的不变式 ——
+        # 灰着的组永远改不了当前选择，想换只能先 `clear_selection()`。
+        if self._picked and self._picked[0] != key:
             return
         version = str(entry.get("id") or entry.get("display_name") or "")
         try:
@@ -288,18 +328,51 @@ class InstallOptions(TranslatableWidget):
         self._picked_index = index
         self._apply_selection()
         self._maybe_autofill_name()
+        self._refresh_icon()
 
-    def switch_to(self, key: str):
-        """改选另一个加载器（点灰掉那组的标题时走这儿）
+    def clear_selection(self):
+        """取消当前选择（选中那组右边的「取消选择」按钮）
 
-        选它的**最新版**（`versions[0]`，列表本来就是新的在前），
-        版本号具体的挑法跟第一次点一行是一回事。
+        ⚠️ **这是锁死之后唯一的退路**（用户 2026-09 定的）：灰掉的那几组标题
+        是禁用的、点不动，"想换一个"必须走这里。别把这个入口去掉，不然
+        选错一次只能返回上一页重进。
+        名字是我们自动填的话就退回版本 id（用户手改过的不动）。
         """
-        row = next((r for r in self._rows if r.get("key") == key), None)
-        if row is None or row.get("state") != "ok" or not row.get("versions"):
-            # 没版本 / 没做 / 拉不到的那几组：灰着就是灰着，不给改选
+        if not self._picked:
             return
-        self.on_item_clicked(key, {"id": row["versions"][0].get("version", "")}, 0)
+        self._picked = None
+        self._picked_index = -1
+        # ⚠️ Fabric API 的选择是"选了 Fabric"的下级选择：加载器都取消了，
+        # 它也该回到默认（下次再选 Fabric 时重新取最新那版），
+        # 不然用户会莫名其妙发现"怎么还是上次那个旧 API"
+        self._api_picked = None
+        self._api_off = False
+        self._apply_selection()
+        if not self.name_edited:
+            self.name_edit.setText(str((self._entry or {}).get("id") or ""))
+        self._refresh_icon()
+
+    def _refresh_icon(self):
+        """顶部那个图标跟着**选中的加载器**变（没选就是游戏版本自己那张图）
+
+        ⚠️ 用户 2026-09 提的：选了 Fabric 之后名字已经写成
+        `1.21.4-Fabric 0.19.5`、目标目录也跟着变了，唯独左上角还画着草方块 ——
+        一眼扫过去最先看到的那个图标跟后面全对不上。
+        （真装完之后的版本列表那边是靠**扫描目录自动识别**的，所以这里只是
+        "预览"，不落盘、也不影响安装结果。）
+        """
+        if self._picked and self._picked[0]:
+            key, version = self._picked
+            # 带 `loader` 字段，`version_icon_name()` 就会挑 fabric.png / forge.png
+            entry = {"id": version, "display_name": version,
+                     "type": "release", "loader": key}
+        else:
+            entry = self._entry or {}
+        pix = version_pixmap(entry, ICON_SIZE, self._dpr)
+        if pix is not None:
+            self.icon.setPixmap(pix)
+        else:
+            self.icon.clear()
 
     def picked_loader(self):
         """用户**显式点过**的加载器 `(key, version)`；没点过就是 `(None, "")`
@@ -314,20 +387,21 @@ class InstallOptions(TranslatableWidget):
     def _apply_selection(self):
         """按 `self._picked` 把各组锁/解锁、标出选中的那一行、刷新状态文字
 
-        - 选中那组：解锁、展开、描边亮起来、里面选中的那行标出来
-        - 其他组：`set_locked(True)`（灰掉、收起来、副标题写"与 X 不兼容"、
-          提示"点一下改成它"），但**点标题仍然能改选**（见 `switch_to`）
+        - 选中那组：解锁、展开、描边亮起来、里面选中的那行标出来，
+          标题右边多一个「取消选择」（**唯一**的改选入口）
+        - 其他组：`set_locked(True)`（灰掉、收起来、标题点不动、
+          副标题写"与 X 不兼容"、tooltip 说清要换该怎么办）
         """
         picked_key = self._picked[0] if self._picked else ""
+        picked_name = LOADER_NAMES.get(picked_key, picked_key) if picked_key else ""
         for key, group in self._groups.items():
             picked_here = key == picked_key
-            row = next((r for r in self._rows if r.get("key") == key), None)
-            name = (row or {}).get("name", key)
-            group.set_locked(bool(picked_key) and not picked_here,
-                             note=self._note_for(key),
-                             tooltip=(tr("点一下改成 {name}", name=name)
-                                      if picked_key and not picked_here else ""))
+            locked = bool(picked_key) and not picked_here
+            group.set_locked(locked, note=self._note_for(key),
+                             tooltip=(tr("已经选了 {name}，要换就点选中那组的「取消选择」", name=picked_name)
+                                      if locked else ""))
             group.set_selected(picked_here)
+            group.set_action(tr("取消选择") if picked_here else "")
             if picked_here:
                 # ⚠️ 顺序不能反：折叠着的组还没建行，得先展开再标"已选"
                 # （反过来的话 `set_picked_index()` 找不到任何行，标记丢失）
@@ -335,6 +409,38 @@ class InstallOptions(TranslatableWidget):
             # ⚠️ 只标记**这一组**里的行：`_picked_index` 是"这一组的第几个"，
             # 不是全局的，标到别的组上会点亮不相干的一行
             group.set_picked_index(self._picked_index if picked_here else -1)
+        # Fabric API 那一组的显隐跟着"选的是不是 Fabric"走
+        self._maybe_want_api()
+        self._refresh_api_group()
+        self._refresh_hint()
+
+    def _refresh_hint(self):
+        """按钮上方那行提示：**没选加载器时说清楚"这次只装原版"**
+
+        ⚠️ 为什么要有它：一组都不默认展开、也不给默认加载器之后，"什么都不点"
+        会装出**纯原版** —— 不说的话用户点完才发现没装加载器（反过来，以前
+        什么都不点会悄悄装 Forge，同样说不清）。选了加载器就收起来：
+        那组的副标题已经写着「已选 0.19.5（共 253 个）」了。
+        """
+        if self._picked or not self._groups:
+            self.set_status("")
+            return
+        self.set_status(tr("还没选加载器 —— 直接点「开始下载」只会装原版"))
+
+    def _maybe_want_api(self):
+        """选了 Fabric、但手上还没有 Fabric API 的数据 → 向页面要一次
+
+        ⚠️ 这件事**不能**放在 `_refresh_api_group()` 里：那一组是"有数据才建"的，
+        没有数据时它连着 return 两次，请求根本发不出去（测试抓到过）。
+        """
+        if not (self._picked and self._picked[0] == "fabric"):
+            return
+        if self._api_versions:
+            return
+        mc = str((self._entry or {}).get("id") or "")
+        if mc and self._api_asked_mc != mc:
+            self._api_asked_mc = mc
+            self.api_wanted.emit(mc)
 
     def _note_for(self, key: str) -> str:
         """某个组现在该显示的状态文字"""
@@ -347,6 +453,117 @@ class InstallOptions(TranslatableWidget):
                 return tr("已选 {v}（共 {n} 个）", v=self._picked[1], n=count)
             return tr("已选 {v}", v=self._picked[1])
         return self._status_text(row)
+
+    # ---------- Fabric API（选了 Fabric 才出现）----------
+
+    def set_api_versions(self, versions):
+        """页面上层把 Fabric API 的候选版本递进来（Modrinth，已按游戏版本筛过）
+
+        空列表 = 没有 / 拉不到 → 那一组**不出现**（不占位也不说废话）。
+        """
+        self._api_versions = [v for v in (versions or []) if isinstance(v, dict)]
+        self._api_picked = None
+        self._api_off = False
+        self._make_api_group()
+        self._refresh_api_group()
+
+    def _make_api_group(self):
+        """建「Fabric API」那一组（**不在** `self._groups` 里）
+
+        ⚠️ 它不能进 `self._groups`：那个表是"加载器互斥"用的，进去的话
+        选中 Fabric API 会把 Fabric 自己锁掉 —— 它俩不是互斥关系，
+        是"配套"。
+        """
+        if self._api_group is not None or not self._api_versions:
+            return
+        group = CollapsibleGroup(tr("Fabric API"))
+        group.set_items([self._api_entry(v) for v in self._api_versions])
+        group.item_activated.connect(
+            lambda _e, idx: self.on_api_clicked(idx))
+        group.action_triggered.connect(self.toggle_api)
+        group.set_expanded(True)          # 就一两条，展开着让用户看见装的是哪版
+        self._api_group = group
+        self._loader_box.insertWidget(self._loader_box.count() - 1, group)
+
+    @staticmethod
+    def _api_entry(version: dict) -> dict:
+        """Modrinth 的一个版本 → `version_pixmap` 认识的样子
+
+        ⚠️ **不要**给 `loader` 字段：给了就会被认成"加载器版本行"，
+        跟上面那几组画一样的图标，看不出它是 mod。用 `kind="pack"` 走箱子图标。
+        """
+        num = version.get("version_number", "")
+        return {
+            "id": num, "display_name": num, "type": "release",
+            "kind": "pack", "loader": "",
+            "release_time": version.get("date_published", ""),
+        }
+
+    def on_api_clicked(self, index: int):
+        """点了 Fabric API 里的一个版本 → 改成装那一个"""
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return
+        if not (0 <= index < len(self._api_versions)):
+            return
+        if self._api_picked == index and not self._api_off:
+            return
+        self._api_picked = index
+        self._api_off = False
+        self._refresh_api_group()
+
+    def toggle_api(self):
+        """「不装 / 装上」Fabric API（那个小按钮）"""
+        if not self._api_versions:
+            return
+        self._api_off = not self._api_off
+        self._refresh_api_group()
+
+    def _refresh_api_group(self):
+        """Fabric API 那一组的显隐 + 副标题 + 选中行
+
+        ⚠️ 只有**选了 Fabric** 才显示：别的加载器装 Fabric API 没有任何意义
+        （它是 Fabric 的 API 实现），显示了只会让人以为"装什么都行"。
+        """
+        group = self._api_group
+        if group is None:
+            return
+        fabric = bool(self._picked) and self._picked[0] == "fabric"
+        if not fabric or not self._api_versions:
+            group.setVisible(False)
+            if not fabric:
+                # 换了别的加载器 → 之前"不装"的选择作废（下次选回 Fabric 要重新生效）
+                self._api_off = False
+            return
+
+        if self._api_off:
+            group.set_note(tr("不装"))
+            group.set_action(tr("装上"), tooltip=tr("把这个也一起装上"))
+            group.set_picked_index(-1)
+        else:
+            if self._api_picked is None:
+                self._api_picked = 0          # 默认最新那个
+            version = self._api_versions[self._api_picked]
+            group.set_note(tr("会一起装 {v}",
+                              v=version.get("version_number", "")))
+            group.set_action(tr("不装"), tooltip=tr("这次不装 Fabric API"))
+            group.set_picked_index(self._api_picked)
+        group.set_selected(not self._api_off)
+        group.set_locked(False)
+        group.set_expanded(True)
+        group.setVisible(True)
+
+    def api_version(self):
+        """当前要一起装的 Fabric API 版本（dict）；不装 / 选了别的加载器 → None"""
+        if self._api_off or not self._api_versions:
+            return None
+        if not (self._picked and self._picked[0] == "fabric"):
+            return None
+        index = 0 if self._api_picked is None else self._api_picked
+        if not (0 <= index < len(self._api_versions)):
+            return None
+        return self._api_versions[index]
 
     # ---------- 文件名自动填 ----------
 
@@ -381,6 +598,7 @@ class InstallOptions(TranslatableWidget):
         # ⚠️ 分组表也要清：留着的话 `_apply_selection()` 会去碰已经
         # deleteLater 掉的控件（"wrapped C/C++ object has been deleted"）
         self._groups = {}
+        self._api_group = None
 
     # ---------- 动作 ----------
 
@@ -390,15 +608,41 @@ class InstallOptions(TranslatableWidget):
         return text or (self._entry or {}).get("id", "")
 
     def selected_loader(self):
-        """**兜底**用哪个加载器：第一个能装的 + 它的最新版
+        """**兜底**用哪个加载器 —— 现在是「**不装**」，返回 `("", "")`
 
-        ⚠️ 用户手点过的话以 `picked_loader()` 为准（见 `_on_install`）——
-        这个方法只回答"他什么都没点的时候默认装什么"。
+        ⚠️ 这里原来返回的是"第一个能装的那家 + 它的最新版"（也就是 Forge）。
+        那等于**替用户做主**：他什么都没点、直接按「开始下载」，装出来的是
+        Forge —— 而界面上没有任何地方说这件事（用户 2026-09 定的：
+        "让用户自己选择，不展开任何选项"）。
+
+        所以现在：**一个都不点 = 只装原版**。想装加载器就自己展开一家、点一个
+        版本（`picked_loader()` 会拿到）。按钮上方那行提示也会明说
+        「还没选加载器 —— 直接点「开始下载」只会装原版」（见 `_refresh_hint`）。
         """
+        return "", ""
+
+    def loader_extra(self, key: str, version: str) -> dict:
+        """传给安装器的额外数据（现在只有 OptiFine 用得上：`type` / `patch`）
+
+        OptiFine 的安装器下载地址是 `/optifine/<mc>/<type>/<patch>`，
+        这两段只能从版本表的原始数据里拿（见 `core/loader_setup.installer_url`）。
+
+        ⚠️ 别把整个版本 dict 塞进去：那里面还有 `filename`、`forge` 这些
+        跟安装器没关系的东西，将来谁往里加字段就可能悄悄混进请求参数里。
+        """
+        extra = {}
+        if (key or "").lower() != "optifine":
+            return extra
         for row in self._rows:
-            if row.get("state") == "ok" and row.get("versions"):
-                return row.get("key"), row["versions"][0].get("version", "")
-        return None, ""
+            if row.get("key") != key:
+                continue
+            for item in row.get("versions") or []:
+                if (isinstance(item, dict)
+                        and str(item.get("version") or "") == str(version or "")):
+                    extra["type"] = str(item.get("type") or "")
+                    extra["patch"] = str(item.get("patch") or "")
+                    return extra
+        return extra
 
     def set_target_dir(self, path):
         """告诉用户"点了开始下载，文件会装到哪"
@@ -435,7 +679,8 @@ class InstallOptions(TranslatableWidget):
 
     def _on_install(self):
         entry = self._entry or {}
-        # 用户点过就用他点的那个版本；没点过才退回"第一个能装的 + 最新版"
+        # 用户点过就用他点的那个版本；**没点过就是不装加载器**（纯原版）——
+        # 兜底不再替用户挑一家（见 `selected_loader`）
         loader_key, loader_version = self.picked_loader()
         if not loader_key:
             loader_key, loader_version = self.selected_loader()
@@ -444,6 +689,10 @@ class InstallOptions(TranslatableWidget):
             "name": self.version_name(),
             "loader_key": loader_key,
             "loader_version": loader_version,
+            # 安装器要的额外数据（OptiFine 的 type/patch；别家是空 dict）
+            "loader_extra": self.loader_extra(loader_key, loader_version),
+            # 要一起装的 Fabric API（没选 Fabric / 点了「不装」就是 None）
+            "api_version": self.api_version(),
         })
 
     # ---------- 语言 ----------
