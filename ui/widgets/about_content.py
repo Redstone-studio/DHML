@@ -7,9 +7,8 @@
 现在改成设置页里一个按钮弹出来（桌面软件的标准做法，PCL2 也是收在设置里的）。
 
 ⚠️ 有两处**还没定**，都做成了模块级常量，定了改一行就行：
-  - PROJECT_URL     启动器最终叫什么、仓库要不要改名都还没定，所以先留空。
-                    留空时「查看源代码」按钮是禁用状态 + 提示"链接待定"，
-                    而不是点开一个死链，也不是假装能点。
+  - PROJECT_URL     仓库地址（2026-09 已填上）。留空时「查看源代码」按钮是禁用
+                    状态 + 提示"链接待定"，而不是点开一个死链，也不是假装能点。
   - COPYRIGHT_HOLDER  版权归属，填你的名字或组织名。
 """
 
@@ -23,8 +22,8 @@ from core.app_info import APP_NAME, APP_VERSION
 from core.i18n import tr
 from ui.translatable import TranslatableWidget
 
-# 留空 = 还没定。填上就自动变成可点。
-PROJECT_URL = ""
+# 仓库地址（用户 2026-09 定的）。填上之后「查看源代码」就是可点的。
+PROJECT_URL = "https://github.com/kongxia114/Mosslight-Launcher"
 
 COPYRIGHT_HOLDER = "Redstone Studio"
 COPYRIGHT_YEAR = "2026"
@@ -160,15 +159,21 @@ class AboutContent(TranslatableWidget):
         box.addLayout(name_row)
 
         box.addWidget(self.label(
-            "一个用 Python + PyQt6 写的 Minecraft 启动器，能扫描本地版本、管理账户。"
-            "启动游戏和版本下载还在做。", "LicenseText"
+            "一个用 Python + PyQt6 写的 Minecraft 启动器：扫描本地版本、装原版和"
+            "加载器（Forge / NeoForge / Fabric / Quilt / OptiFine）、装整合包和模组、"
+            "启动游戏，都在这一个界面里。", "LicenseText"
         ))
 
         self.source_btn = self.button("查看源代码")
         if PROJECT_URL:
             self.source_btn.clicked.connect(lambda: _open(PROJECT_URL))
+            # 把地址也写在悬停提示里：按钮点开会跳到浏览器，但用户可能想先看清是哪个仓库
+            # ⚠️ 直接 setToolTip，**不能**走 self.bind(..., "toolTip") ——
+            # bind 会拿这个 key 去 tr()，等于把网址当成一条文案登记进语言表，
+            # 提取工具还会把它当成新文案收进 assets/lang/*.json。
+            self.source_btn.setToolTip(PROJECT_URL)
         else:
-            # 仓库地址还没定 —— 禁用而不是留个死链
+            # 仓库地址没填 —— 禁用而不是留个死链
             self.source_btn.setEnabled(False)
             self.bind(self.source_btn, "仓库地址还没定", "toolTip")
 

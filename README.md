@@ -1,5 +1,4 @@
-# Mosslight Launcher
-
+# DHML
 
 PyQt6 写的 Minecraft 启动器。自己用的，顺手开源。
 
@@ -82,7 +81,7 @@ python tools/extract_strings.py            # 只检查：漏网的裸中文、f-
 ```
 v0.2.0   拼 Java 命令，真能启动游戏
 v0.3.0   设置页补 Java 路径（要按版本挑 8 / 17 / 21）
-v0.6.0   从 Mojang与BMCAPI 拉版本清单下载
+v0.4.0   从 Mojang 拉版本清单下载
 ```
 
 正版验证和第三方验证现在只有 UI，逻辑没写。
