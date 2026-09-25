@@ -70,6 +70,8 @@ class _ColorSwatch(QPushButton):
 class PersonalizePage(TranslatableWidget):
     theme_changed = pyqtSignal()
     language_changed = pyqtSignal(str)
+    # 背景设置对话框里改了游戏目录之类"要重扫"的东西（主窗口收到后重扫版本）
+    config_changed = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -86,6 +88,7 @@ class PersonalizePage(TranslatableWidget):
 
         layout.addWidget(self._make_theme_card())
         layout.addWidget(self._make_accent_card())
+        layout.addWidget(self._make_appearance_card())
         layout.addWidget(self._make_language_card())
         layout.addStretch()
 
@@ -207,6 +210,67 @@ class PersonalizePage(TranslatableWidget):
 
         box.addWidget(self.label("拖动滑块会直接生效，并取消上面预设色的选中。", "HintText"))
         return card
+
+    def _make_appearance_card(self):
+        """背景 + 动效：设置项太多，塞进对话框（这里只放入口）
+
+        为什么不直接摊在页面上：这两块加起来有十几个控件（背景图 / 铺法 /
+        压暗 / 卡片透明度 / 淡入开关 / 7 档预设 / 5 档速度），铺出来比整页
+        其它内容加起来还长。PCL2 也是把这类"进去慢慢调"的东西放进子界面。
+        """
+        card, box = self._card("背景与动效")
+
+        box.addWidget(self.label(
+            "背景图 / 铺法 / 压暗 / 卡片透明度，以及列表的入场动画。改完立刻生效。",
+            "HintText"))
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+
+        self.bg_btn = QPushButton()
+        # ⚠️ 按钮文字也要走 bind()：直接 QPushButton(tr(...)) 只在构造时取一次，
+        # 切语言后不会变（这个坑在色块那儿真犯过）。
+        self.bind(self.bg_btn, "背景设置…")
+        self.bg_btn.clicked.connect(self._open_appearance_dialog)
+        row.addWidget(self.bg_btn)
+
+        self.anim_btn = QPushButton()
+        self.bind(self.anim_btn, "动效设置…")
+        self.anim_btn.clicked.connect(self._open_anim_dialog)
+        row.addWidget(self.anim_btn)
+
+        row.addStretch()
+        box.addLayout(row)
+        return card
+
+    # ---------- 两个设置对话框 ----------
+
+    def _make_appearance_dialog(self):
+        """把背景设置对话框建好并接线（**不** exec，测试要用这个入口）
+
+        ⚠️ parent 传 self（页面）而不是主窗口：对话框是模态的，父子关系挂上
+        才算"属于这个界面"。它自己会沿 parentWidget() 往上找主窗口的
+        `apply_appearance`（`window()` 不行 —— QDialog 自己就是顶层窗口）。
+        """
+        from ui.dialogs.appearance_dialog import AppearanceSettingsDialog
+        dlg = AppearanceSettingsDialog(self, getattr(self.window(), "canvas", None))
+        # 游戏目录之类的改动要主窗口重扫（沿用现成的 config_changed 约定）
+        dlg.config_changed.connect(self.config_changed)
+        return dlg
+
+    def _open_appearance_dialog(self):
+        """背景设置：改一格就重画一次背景（canvas 直接递进去）"""
+        dlg = self._make_appearance_dialog()
+        dlg.exec()
+        # 卡片透明度/背景可能动过 —— 让主窗口按当前配置重套一遍样式表，
+        # 免得出现"对话框里看着变了、关掉之后又回去"的错觉
+        self.theme_changed.emit()
+
+    def _open_anim_dialog(self):
+        """动效设置：选预设 + 速度档，右侧有实时预览"""
+        from ui.dialogs.anim_settings_dialog import AnimSettingsDialog
+        dlg = AnimSettingsDialog(self)
+        dlg.exec()
 
     def _make_language_card(self):
         card, box = self._card("界面语言")

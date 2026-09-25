@@ -8,10 +8,11 @@
    （QThread 在运行中被析构会直接终止进程，被坑过，见 core/download.py 的说明）。
 2. **颜色不写死** —— 全部走 `assets/styles/parts/80-mods.qss` 的 `@token@`。
 3. **文案走 `tr()`** —— 源码中文就是 key。
-4. **不移植入场动画四件套**（`slide_in` / `anim_prefs` / `pcl_ease` / `clip_box`）
-   —— 用户 2026-09 明确决定：那套要大量适配、还可能引 bug，先只搬基础功能。
-   所以这里的列表是**普通控件直接建**，没有 SlideInRow / StaggerReveal；
-   观感靠 QSS 和主项目现有列表保持一致。
+4. **入场动画搬到主项目了（2026-09 用户要求）** —— `slide_in` / `anim_prefs` /
+   `pcl_ease` 已经进主项目（`core/anim_prefs.py` + `ui/widgets/slide_in.py`），
+   这里的结果卡片和版本分组都走 `StaggerReveal` 依次滑入；
+   风格和速度在「个性化 → 动效设置」里调，卡片透明度在「背景设置」里调。
+   ⚠️ 之前这里写的是"先不移植那四件套"，那一条已经被用户的新要求取代了。
 
 ## 一页两态
 
@@ -47,11 +48,14 @@ from PyQt6.QtWidgets import (
 from core import mc_dir as mcd
 from core import modpack as mpk
 from core import modrinth_api as api
-from core.cache import load_icon, save_icon
+from core.cache import install_version_icon, load_icon, save_icon
 from core.config import config, effective_threads
 from core.download import DownloadManager, human_size
 from core.i18n import tr
 from core import install as install_mod
+from core import loader_install
+from core import standalone
+from core.loaders import LOADER_NAMES
 from ui.translatable import TranslatableWidget
 
 # 轮询间隔：跟下载页那边一致（150ms，人眼够用，也不至于空转）
@@ -204,6 +208,12 @@ def format_date(raw: str) -> str:
     return text
 
 
+def loaders_label(key: str) -> str:
+    """加载器的显示名（Forge / Fabric / …）—— 没有就用原 key，别显示成空白"""
+    text = str(key or "").lower()
+    return LOADER_NAMES.get(text, key or "")
+
+
 def version_file(version: dict):
     """版本里该下的那个文件（**转发到 core.modrinth_api**，保留这个名字给测试用）"""
     return api.primary_file(version)
@@ -300,6 +310,52 @@ def _numbers(text: str) -> tuple:
         digits = "".join(ch for ch in part if ch.isdigit())
         out.append(int(digits) if digits else 0)
     return tuple(out) or (0,)
+
+
+def _version_dir_names(mc_dir) -> set:
+    """`versions/` 下现有哪些目录名（装前装后各取一次，多的就是这次装的）"""
+    import os as _os
+    from pathlib import Path as _Path
+    root = _Path(mc_dir) / "versions"
+    try:
+        return {p.name for p in root.iterdir() if p.is_dir()}
+    except (_os.OSError, AttributeError):
+        return set()
+
+
+def _log_win(win, text: str) -> None:
+    """往下载窗口那个控制台写一句（没有窗口就丢掉）"""
+    if win is not None and text:
+        try:
+            win.stage_write(text)
+        except Exception:                                   # noqa: BLE001
+            pass
+
+
+def _drop_version_dir(mc_dir, version_id: str, win=None) -> bool:
+    """删掉一个**这次安装才造出来**的中间层版本目录
+
+    ⚠️ 只在"里面的东西已经合进实例了、而且没有任何版本还继承它"时才删 ——
+    不然就是把人家的版本吃了。调用方负责确认它确实是这次造的（见 `_fresh_dirs`）。
+    """
+    import shutil as _shutil
+    from pathlib import Path as _Path
+    if not version_id:
+        return False
+    if standalone.referenced_by(mc_dir, version_id):
+        _log_win(win, tr("还有版本继承着 {name}，先留着", name=version_id))
+        return False
+    folder = _Path(mc_dir) / "versions" / version_id
+    if not folder.is_dir():
+        return False
+    try:
+        _shutil.rmtree(folder)
+        _log_win(win, tr("中间那层 {name} 已经合进实例，目录撤掉了",
+                         name=version_id))
+        return True
+    except OSError as e:
+        _log_win(win, tr("撤掉 {name} 失败：{err}", name=version_id, err=e))
+        return False
 
 
 def group_title(group: dict) -> str:
@@ -581,8 +637,16 @@ class ModVersionGroup(QWidget):
     def _on_clicked(self):
         self.set_expanded(self.header.isChecked(), animate=True)
 
+    def _anim_enabled_for_group(self) -> bool:
+        """动效总开关（模块级函数，方便分组控件自己问一次）"""
+        from core import appearance
+        return appearance.get_anim_enabled()
+
     def set_expanded(self, expanded: bool, animate: bool = True):
         expanded = bool(expanded)
+        # 动效总开关关掉时一律不播展开动画（这里每天要展开几十个分组）
+        if animate and not self._anim_enabled_for_group():
+            animate = False
         self._expanded = expanded
         self.header.setChecked(expanded)
         self._refresh_header()
@@ -686,6 +750,9 @@ class ModsPage(TranslatableWidget):
         self._current_project = {}
         self._groups = []
         self._cards = []
+        # 入场动画：结果列表和版本列表**各一个**调度器（互不打扰，见 _stagger_for）
+        self._staggers = {}
+        self._row_hosts = {"results": [], "versions": []}
         # 详情页的批次状态：已经铺了几组、末尾那个「加载更多分组」按钮
         self._shown_groups = 0
         self._more_groups_btn = None
@@ -1131,12 +1198,72 @@ class ModsPage(TranslatableWidget):
         # ⚠️ 撑开项每次清空后都要补回来（spacer 没有 widget()，takeAt 已经把它
         # 从布局里摘掉了；少了它内容不满一屏时高度会被平摊给每一行）
         self.results_box.addStretch()
+        self._clear_stagger("results")
         for card in self._cards:
             card.setParent(None)
             card.deleteLater()
         self._cards = []
 
-    def _add_result_widget(self, w):
+    def _anim_enabled(self) -> bool:
+        """动效总开关（"关闭动效省性能"）。关掉时列表**不包那层动画控件**
+
+        为什么要单独一个方法而不是直接读设置：这里被问得很频繁（每张卡片一次），
+        以后要缓存也只需要改这一处。读的是 `core/config` 里的内存字典，不落盘。
+        """
+        from core import appearance
+        return appearance.get_anim_enabled()
+
+    def _stagger_for(self, kind: str):
+        """结果 / 版本列表的入场动画调度器（懒建，每次读一遍设置）
+
+        ⚠️ 两个列表**各用一个**：调度器内部是"队列 + 一个定时器"，
+        共用一个的话，正在铺结果时又去铺版本会互相插队（而且 clear 一个会把
+        另一个也清掉）。
+        """
+        st = self._staggers.get(kind)
+        if st is not None:
+            return st
+        from core import anim_prefs, appearance
+        from ui.widgets.slide_in import StaggerReveal
+
+        try:
+            base = anim_prefs.preset_for_versions(appearance.get_preset_key())
+            preset = anim_prefs.scaled(
+                base, anim_prefs.speed_factor(appearance.get_speed_key()))
+        except Exception:                                   # noqa: BLE001
+            preset = anim_prefs.preset_for_versions(anim_prefs.DEFAULT_PRESET)
+        st = StaggerReveal(
+            self, interval=preset.interval, initial_offset=preset.offset,
+            direction=preset.direction, style=preset.style,
+            duration=preset.duration, overshoot=preset.overshoot,
+            bounce_ratio=preset.bounce_ratio, ease=preset.ease)
+        self._staggers[kind] = st
+        return st
+
+    def _start_stagger(self, kind: str):
+        """一批铺完之后点名开播
+
+        ⚠️ 必须收尾调一次：`StaggerReveal` 一次只放一张，靠 `start()` 点第一张、
+        之后由自己的定时器往下走。漏了这句的话整批卡片就**一张都不出现**
+        （实验项目使用说明第 12 条就是踩这个）。
+        """
+        st = self._staggers.get(kind)
+        if st is not None:
+            st.start()
+
+    def _clear_stagger(self, kind: str):
+        """叫停并清空（换搜索词 / 离开详情页时调）"""
+        st = self._staggers.get(kind)
+        if st is not None:
+            st.clear()
+        for host in self._row_hosts.get(kind, []):
+            try:
+                host.stop()
+            except RuntimeError:            # 控件已经没了
+                pass
+        self._row_hosts[kind] = []
+
+    def _add_result_widget(self, w, animate: bool = True):
         """插到末尾撑开项**前面**，并确保真的显示出来
 
         不能 `addWidget`：布局末尾常驻一个撑开项，`addWidget` 会把它追加到
@@ -1144,9 +1271,17 @@ class ModsPage(TranslatableWidget):
 
         ⚠️ `setVisible(True)` 的理由跟 `_add_version_widget` 完全一样：
         页面已经显示时新建的控件默认是隐藏的。
+
+        `animate=True` 时把控件包进 `SlideInRow`，由页面级 `_stagger` 依次点名
+        滑入（那套调度器一次只放一张，所以**必须**在批次结束后 `_start_stagger()`）。
         """
-        self.results_box.insertWidget(self.results_box.count() - 1, w)
-        w.setVisible(True)
+        host = w
+        if animate and self._anim_enabled():
+            host = self._stagger_for("results").add(w)
+            self._row_hosts["results"].append(host)
+        self.results_box.insertWidget(self.results_box.count() - 1, host)
+        host.setVisible(True)
+        return host
 
     # ============================================================
     # 详情
@@ -1217,6 +1352,7 @@ class ModsPage(TranslatableWidget):
         self._load_icon(str(data.get("icon_url") or ""), self.detail_icon, 96)
 
     def _clear_versions(self):
+        self._clear_stagger("versions")
         while self.version_box.count():
             item = self.version_box.takeAt(0)
             w = item.widget()
@@ -1299,13 +1435,15 @@ class ModsPage(TranslatableWidget):
             self._more_groups_btn = btn
 
         self._populating = False
+        # 这批铺完 → 点名开播入场动画（见 _start_stagger 的说明：漏了会整批不出现）
+        self._start_stagger("versions")
         # 结算之后再判一次"够不够一屏"（见 _check_short_content）
         self._schedule_short_check()
 
     def _release_populating(self):
         self._populating = False
 
-    def _add_version_widget(self, w):
+    def _add_version_widget(self, w, animate: bool = True):
         """插到版本列表末尾撑开项**前面**，并确保它真的显示出来
 
         ⚠️ 那句 `setVisible(True)` 不是多余的。Qt 有个很反直觉的规矩：
@@ -1318,9 +1456,17 @@ class ModsPage(TranslatableWidget):
         分组、那个「加载更多分组」按钮、以及"没有版本"的提示行**都会中招** ——
         表现成"点进来只有一页空白"。
         统一在这一个出口上显式显示，比在每个调用点各写一遍可靠。
+
+        `animate=True` 时包一层 `SlideInRow` 滑入（见 `_add_result_widget`）。
+        动效总开关关掉时不包 —— 见 `_anim_enabled`。
         """
-        self.version_box.insertWidget(self.version_box.count() - 1, w)
-        w.setVisible(True)
+        host = w
+        if animate and self._anim_enabled():
+            host = self._stagger_for("versions").add(w)
+            self._row_hosts["versions"].append(host)
+        self.version_box.insertWidget(self.version_box.count() - 1, host)
+        host.setVisible(True)
+        return host
 
     def _refresh_pick_hint(self):
         """底部提示：会装到哪（版本隔离算出来的目录）"""
@@ -1553,16 +1699,24 @@ class ModsPage(TranslatableWidget):
         threading.Thread(
             target=self._modpack_worker,
             args=(pack_url, instance_dir, tmp_pack, inst_name, version,
-                  pack_size, pack_sha1, ptype, manager),
+                  pack_size, pack_sha1, ptype, manager, Path(mc),
+                  str(project.get("icon_url") or ""), win),
             daemon=True).start()
         self._timer.start()
 
     def _modpack_worker(self, pack_url, instance_dir, tmp_pack, inst_name,
-                        version, pack_size, pack_sha1, ptype, mgr):
-        """后台线程：下 .mrpack → 解析 → 下所有文件 → 解压 overrides → 写版本 JSON
+                        version, pack_size, pack_sha1, ptype, mgr, mc_dir,
+                        icon_url="", win=None):
+        """后台线程：下 .mrpack → 解析 → 下所有文件 → 解压 overrides
+        → **装它要的原版 + 加载器** → 写版本 JSON
 
         ⚠️ 这里**只写 `self._mp_state`**，不碰任何控件。
         `mgr` 由调用方建好（连同进度窗口一起），这里只管往里塞任务。
+
+        最后那一步是照 PCL 补的（`ModModpack.cs` 的 `InstallPackModrinth`：
+        包文件装完之后还有一道 `McInstallLoader`）。**只装我们装得了的加载器**
+        （Fabric / Quilt，见 `core/loader_install.py`）；Forge 那几家会明说
+        "加载器还没做"，那时实例里只有整合包的文件、不能直接启动。
         """
         state = self._mp_state
         try:
@@ -1600,19 +1754,183 @@ class ModsPage(TranslatableWidget):
             state["msg"] = tr("正在解压整合包")
             written, errors = mpk.apply_overrides(blob, plan, instance_dir)
 
-            # ---- 第 5 步：写版本 JSON，让启动器认得出这个实例 ----
+            # ---- 第 5 步：装它要的原版 + 加载器（PCL 的 McInstallLoader 那一步）----
             #
-            # ⚠️ **到这里为止**。原版和加载器**不由这里装**（用户 2026-09 明确：
-            # 整合包这一路的职责就是"把整合包里的文件下下来、解压 overrides、
-            # 按 JSON 落好"，原版和加载器他自己手动装）。
-            # JSON 的具体内容见 `core/modpack.py` 的 `version_json()`。
-            vj = plan.version_json(inst_name, overrides_written=written)
-            install_mod.write_version_json(vj, instance_dir, inst_name)
+            # ⚠️ 这一步是**照 PCL 补的**：光把整合包的文件铺好，实例是"能列出
+            # 来、点启动缺 mainClass"。装上加载器之后版本 JSON 才是完整的一份
+            # （`inheritsFrom` 指原版、`mainClass` 是加载器的）。
+            # 只装我们装得了的（Fabric / Quilt）；Forge 那几家会明说没做。
+            mc_id = plan.minecraft
+            loader_key, loader_version = plan.loader()
+            loader_note = ""
+            installed_loader = None
+            loader_inherit = ""      # 实例 JSON 要继承谁（只有安装器那条路会填）
+            # 装之前记一份 `versions/` 名单：装完之后多出来的就是**这次造的**，
+            # 只有"这次造的中间层"才允许在合并之后撤掉（见 `_drop_version_dir`）
+            _dirs_before = _version_dir_names(mc_dir)
+            _fresh_dirs = set()
+            # 原版那层可能被上一次安装收进了 `.mosslight/vanilla/`：装之前搬回来
+            # （安装器和版本 JSON 都要求它在 `versions/` 下露着）
+            if standalone.materialize(mc_dir, mc_id):
+                _dirs_before = _version_dir_names(mc_dir) - {mc_id}
+                _log_win(win, tr("把原版 {mc} 从 .mosslight 搬回来了", mc=mc_id))
+            if mc_id and loader_install.installable(loader_key):
+                state["msg"] = tr("正在安装原版 {mc} 和 {loader}…",
+                                  mc=mc_id,
+                                  loader=loaders_label(loader_key))
+                try:
+                    url = loader_install.vanilla_json_url(mc_id)
+                    vj = install_mod.http_json(url) if url else None
+                    if not vj:
+                        raise loader_install.LoaderError(
+                            tr("清单里没有原版 {mc}，装不了它的加载器", mc=mc_id))
+                    _vplan, loader_plan, loader_error = (
+                        loader_install.install_stack(
+                            mc_id, vj, mc_dir, mgr, version_id=inst_name,
+                            loader_key=loader_key,
+                            loader_version=loader_version,
+                            fetch=install_mod.http_json,
+                            meta=plan.modpack_meta(overrides_written=written)))
+                    if loader_plan is not None:
+                        mgr.start()
+                        mgr.wait_all(timeout=3600)
+                        # ⚠️ 是**总数**不是增量：snapshot 里含前面那批整合包文件，
+                        # 写成 `+=` 会把之前的失败数算两遍
+                        failed = mgr.snapshot()["failed"]
+                        installed_loader = loader_key
+                    else:
+                        loader_note = loader_error
+                except Exception as e:                  # noqa: BLE001
+                    loader_note = "%s: %s" % (type(e).__name__, e)
+            elif mc_id and loader_key in loader_install.INSTALLER_LOADERS:
+                # Forge / NeoForge：得跑**官方安装器**（要 Java，三分钟起）
+                #
+                # ⚠️ 这里跟上面那条路**落点不一样**，故意不一样：
+                # 安装器自己会在 `versions/` 下建一个目录（`1.20.1-forge-47.4.0`），
+                # 而整合包的实例目录**已经存在**了（包里的文件就铺在那儿），
+                # 改名过去会撞上"目标已存在"直接放弃 —— 那就成了两个互不相干的版本。
+                # 所以加载器装进它**自己**那个目录（PCL 的命名），实例目录写一份
+                # `inheritsFrom` 指过去的 JSON：实例 → 加载器 → 原版，三层，
+                # `load_version()` 的 jar 回退正好一路找到原版的客户端 jar。
+                state["msg"] = tr("正在安装原版 {mc} 和 {loader}…",
+                                  mc=mc_id,
+                                  loader=loaders_label(loader_key))
+                try:
+                    url = loader_install.vanilla_json_url(mc_id)
+                    vj = install_mod.http_json(url) if url else None
+                    if not vj:
+                        raise loader_install.LoaderError(
+                            tr("清单里没有原版 {mc}，装不了它的加载器", mc=mc_id))
+                    # version_id 传空 → 用 PCL 那套名字（`1.20.1-Forge_47.4.0`），
+                    # **不是**实例名
+                    _vplan, loader_plan, loader_error = (
+                        loader_install.install_stack(
+                            mc_id, vj, mc_dir, mgr, version_id="",
+                            loader_key=loader_key,
+                            loader_version=loader_version,
+                            fetch=install_mod.http_json))
+                    if loader_plan is None:
+                        raise loader_install.LoaderError(loader_error)
+                    mgr.start()
+                    mgr.wait_all(timeout=3600)
+                    failed = mgr.snapshot()["failed"]
+                    if failed:
+                        loader_note = tr("有 {n} 个文件没下下来，加载器先不装了",
+                                         n=failed)
+                    else:
+                        what = loaders_label(loader_key)
+                        if win is not None:
+                            win.stage_begin(tr(
+                                "正在跑 {name} 的官方安装器…（要几分钟，别关这个窗口）",
+                                name=what))
+                            if loader_plan.installer_jar:
+                                win.stage_write(tr("安装器：{path}",
+                                                   path=loader_plan.installer_jar))
+                        final, error = loader_install.finish_installer(
+                            loader_plan, mc_dir,
+                            on_line=(win.stage_write if win is not None else None),
+                            manager=mgr)
+                        if error:
+                            if win is not None:
+                                win.stage_end(tr("{name} 没装上", name=what))
+                                win.stage_write(tr("出了点问题：{err}", err=error))
+                            loader_note = error
+                        else:
+                            if win is not None:
+                                win.stage_end(tr("{name} 装好了", name=what))
+                                win.stage_write(tr("完成：{name}", name=final))
+                            installed_loader = loader_key
+                            loader_inherit = final
+                except Exception as e:                  # noqa: BLE001
+                    loader_note = "%s: %s" % (type(e).__name__, e)
+            elif loader_key:
+                # 剩下那几家（Cleanroom / LiteLoader …）确实没做，如实说
+                loader_note = tr("{name} 得跑安装器才能装，这个还没做",
+                                 name=loaders_label(loader_key))
+            elif mc_id:
+                loader_note = tr("这个整合包没写加载器")
+
+            # ---- 第 6 步：写版本 JSON，让启动器认得出这个实例 ----
+            #
+            # 加载器装上去了 → 那份 profile 已经落盘了（install_stack 干的），
+            # 这里**别覆盖**它；没装上才退回"只有元数据"的那份。
+            _fresh_dirs = _version_dir_names(mc_dir) - _dirs_before
+            if installed_loader is None:
+                vj = plan.version_json(inst_name, overrides_written=written)
+                install_mod.write_version_json(vj, instance_dir, inst_name)
+            elif loader_inherit:
+                # 安装器那条路：加载器在自己的目录里，实例先**指过去**，
+                # 后面 `_fold_into_instance` 再把它们合进实例、把中间那层清掉
+                # （顺带把整合包元数据带上，设置页/排查都用得上）
+                vj = plan.version_json(inst_name, overrides_written=written)
+                vj["mainClass"] = ""
+                vj["inheritsFrom"] = loader_inherit
+                install_mod.write_version_json(vj, instance_dir, inst_name)
+
+            # ---- 第 6b 步：**把加载器/原版都合进实例这一个目录** ----
+            #
+            # 用户 2026-09 要的："一个版本一个独立文件夹，分多版本才好管理"。
+            # 整合包尤其明显：装一个包却看到「原版 + 加载器 + 我的包」三行，
+            # 找自己那个包都费劲。合完之后列表里只剩包名这一行。
+            # ⚠️ 失败不影响安装结果（实例 JSON 还是能用的，只是多留一层），
+            # 所以这里只写一句日志。
+            if installed_loader is not None:
+                try:
+                    _ok, _note = standalone.make_standalone(mc_dir, inst_name,
+                                                            mc_id)
+                    if _note:
+                        _log_win(win, _note)
+                    if _ok:
+                        # 中间那层加载器目录是我们这次装的吗？是就撤掉
+                        if loader_inherit and loader_inherit in _fresh_dirs:
+                            _drop_version_dir(mc_dir, loader_inherit, win)
+                        _tail = standalone.cleanup_vanilla(
+                            mc_dir, mc_id, created_by_us=(mc_id in _fresh_dirs))
+                        if _tail:
+                            _log_win(win, _tail)
+                except Exception as _e:                     # noqa: BLE001
+                    _log_win(win, "%s: %s" % (type(_e).__name__, _e))
+
+            # ---- 收尾：把整合包的图标设成实例的图标（PCL 也这么干）----
+            # ⚠️ 失败不影响安装结果，`install_version_icon` 自己吞异常并留一行线索
+            if icon_url:
+                icon_name = install_version_icon(inst_name, icon_url)
+                if icon_name:
+                    state["icon"] = icon_name
 
             # ---- 收尾 ----
+            can_launch = installed_loader is not None
             if failed or errors:
                 state.update(stage="done", msg=tr(
                     "整合包安装结束，但有 {n} 个文件失败", n=max(failed, len(errors))))
+            elif can_launch:
+                state.update(stage="done", msg=tr(
+                    "整合包安装完成：{name}（自带 {loader}，可以直接启动）",
+                    name=plan.name, loader=loaders_label(installed_loader)))
+            elif loader_note:
+                state.update(stage="done", msg=tr(
+                    "整合包文件装好了：{name}（{why}，实例还不能直接启动）",
+                    name=plan.name, why=loader_note))
             else:
                 state.update(stage="done", msg=tr("整合包安装完成：{name}",
                                                   name=plan.name))
@@ -1770,6 +2088,7 @@ class ModsPage(TranslatableWidget):
             self._cards.append(card)
             self._load_icon(str(hit.get("icon_url") or ""), card.icon, 64)
 
+        self._start_stagger("results")
         self._offset += len(hits)
         self.loading.hide_now()
         if self._total > self._offset:

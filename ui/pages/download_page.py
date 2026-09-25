@@ -28,7 +28,9 @@ from PyQt6.QtWidgets import (
 import requests
 
 from core import install as install_mod
+from core import loader_install
 from core import loaders as loaders_mod
+from core import standalone
 from core import versions_remote as vr
 from core.config import config, effective_threads
 from core.download import USER_AGENT, DownloadManager
@@ -161,6 +163,15 @@ class DownloadPage(TranslatableWidget):
         self._loader_timer.setInterval(FETCH_POLL_MS)
         self._loader_timer.timeout.connect(self._poll_loaders)
 
+        # Fabric API（Modrinth）也单独一条：**用户真选了 Fabric 才去拉**
+        self._api_result = None
+        self._loading_api = False
+        self._api_versions = []
+        self._api_mc = ""               # 这批数据是给哪个游戏版本拉的
+        self._api_timer = QTimer(self)
+        self._api_timer.setInterval(FETCH_POLL_MS)
+        self._api_timer.timeout.connect(self._poll_fabric_api)
+
         # 安装那一步：后台线程只写结果，主线程定时器来收（见 _poll_install）
         self._install_timer = QTimer(self)
         self._install_timer.setInterval(FETCH_POLL_MS)
@@ -173,7 +184,11 @@ class DownloadPage(TranslatableWidget):
 
     def _make_nav(self) -> QFrame:
         card = QFrame()
-        card.setObjectName("Card")
+        # ⚠️ 不叫 "Card"：它是**外壳**不是内容卡片 —— 设了背景图时它要跟着
+        # 左侧竖栏一起半透明（见 ui/widgets/card_style.py 的 chrome_stylesheet），
+        # 沿用 "Card" 的话会跟别的卡片一起被"卡片透明度"带走。
+        # 底色/描边仍在 app.qss 里跟 #Card 共用一条规则，所以观感不变。
+        card.setObjectName("DownloadNavCard")
         card.setFixedWidth(NAV_WIDTH)
         box = QVBoxLayout(card)
         box.setContentsMargins(14, 16, 14, 16)
@@ -278,6 +293,8 @@ class DownloadPage(TranslatableWidget):
         self.install_page = InstallOptions()
         self.install_page.back_requested.connect(self._back_to_list)
         self.install_page.install_requested.connect(self._on_install_requested)
+        # 用户选了 Fabric → 才去拉 Fabric API 的版本列表（见 _fetch_fabric_api）
+        self.install_page.api_wanted.connect(self._fetch_fabric_api)
         self.stack.addWidget(self.install_page)             # PAGE_INSTALL
 
         # 社区资源 → 模组（搜索 / 详情 / 下载）。构造时就建好 ——
@@ -558,15 +575,60 @@ class DownloadPage(TranslatableWidget):
             return
         self.install_page.set_rows(payload)
 
+    # ---------- Fabric API（选了 Fabric 才去拉）----------
+
+    def _fetch_fabric_api(self, mc_version: str):
+        """用户**真的选了 Fabric** 之后才去拉 Fabric API 的版本列表
+
+        ⚠️ 不做成"进页面就顺手拉"：Modrinth 那边一次请求不便宜，
+        而选 Forge / NeoForge 的人根本用不上它。
+        """
+        if self._loading_api:
+            return
+        if self._api_mc == mc_version and self._api_versions:
+            return                      # 这个游戏版本的已经拉过了
+        self._loading_api = True
+        self._api_result = None
+        self._api_mc = mc_version
+
+        def worker():
+            versions = []
+            try:
+                versions = loader_install.fabric_api_versions(mc_version)
+            except Exception:                               # noqa: BLE001
+                versions = []       # 拉不到就那一组不出现，不影响装加载器
+            self._api_result = versions
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._api_timer.start()
+
+    def _poll_fabric_api(self):
+        if self._api_result is None:
+            return
+        versions = self._api_result
+        self._api_result = None
+        self._loading_api = False
+        self._api_timer.stop()
+        self._api_versions = list(versions or [])
+        self.install_page.set_api_versions(self._api_versions)
+
     def _on_install_requested(self, payload: dict):
         """「开始下载」：摆出进度窗口 → 后台算清单并下载 → 装完刷新版本列表"""
-        if self._install_win is not None:
-            return                       # 已经在装了，别开第二个
         entry = self._selected or {}
         if not entry:
             return
         mc_dir = config.get_minecraft_dir()
         name = payload.get("name") or entry.get("id", "")
+
+        if self._install_win is not None:
+            # 已经在装了，别开第二个。
+            # ⚠️ 用户 2026-09 反应过这里"点了没反应" —— 其实是在装，
+            # 只是**正装在哪个版本**那句话在安装选项页上，而他这会儿可能
+            # 已经退回列表了。所以这句提示要写在**两个地方**（见下）。
+            note = tr("正在安装 {name}…（进度见弹出的下载窗口）", name=name)
+            self.install_page.set_status(note)
+            self.status.setText(note)
+            return
 
         # ⚠️ 先摆窗口再开跑（顺序反了前几百毫秒的进度会丢）
         # 线程数走设置里的「多线程下载」（开关 + 线程数 1~32）
@@ -581,48 +643,99 @@ class DownloadPage(TranslatableWidget):
         self._install_done = False
         self._install_ok = False
         self._install_result = ""
-        self.install_page.set_status(tr("正在安装…（进度见弹出的下载窗口）"))
 
         threading.Thread(target=self._install_worker,
-                         args=(entry, mc_dir, name, manager),
+                         args=(entry, mc_dir, name, manager, payload),
                          daemon=True).start()
         self._install_timer.start()
 
-    def _install_worker(self, entry: dict, mc_dir, name: str, manager):
-        """后台线程：取版本 JSON → 算清单 → 下载 → 解 natives
+        # ⚠️ **任务跑起来之后自动退回版本列表**（用户 2026-09 要的）。
+        # 为什么：装一个版本要几分钟（Forge 那种还要跑安装器），把用户按在
+        # 「安装选项」那一页上没有任何意义 —— 他既改不了选、也看不到别的版本，
+        # 只能干等。退回列表后进度由那个下载窗口负责，
+        # 而"正在装哪个版本"写在列表页的状态行上（不然退回来以后一点交代都没有）。
+        note = tr("正在安装 {name}…（进度见弹出的下载窗口）", name=name)
+        self.install_page.set_status(note)
+        self._back_to_list()
+        self.status.setText(note)
+
+    def _install_worker(self, entry: dict, mc_dir, name: str, manager,
+                        job: dict = None):
+        """后台线程：取版本 JSON → 算清单 → 下载 → 解 natives（→ 装加载器）
 
         ⚠️ 这里**只写结果**，不碰界面（Qt 控件只能在主线程动）——
         主线程的 _poll_install() 会来收。
+
+        ## 选了加载器时的落点（跟 PCL 一致）
+
+            versions/<游戏版本>/                原版（客户端 jar + 版本 JSON）
+            versions/<用户填的名字>/            加载器 profile（inheritsFrom 指上面那个）
+            versions/<用户填的名字>/mods/       一起装的 mod（Fabric API）
+
+        ⚠️ **原版要装到"游戏版本"那个目录**，不能顺手塞进加载器目录：
+        加载器 JSON 里的 `inheritsFrom` 是父版本 id，启动时
+        `core/launch.py` 正是去 `versions/<父 id>/` 找原版的 JSON 和 jar
+        （`jar` 字段回退成父版本 id）。塞错地方的话 classpath 里就没有
+        Minecraft 的类，Fabric 会报 "couldn't locate the game"。
+        原版已经装过的话这一步只是"检查一遍"，已有文件会被跳过，不重复下载。
         """
+        job = job or {}
+        loader_key = str(job.get("loader_key") or "")
+        loader_version = str(job.get("loader_version") or "")
+        loader_extra = job.get("loader_extra") or {}
+        api_version = job.get("api_version") or None
+        mc_id = str(entry.get("id") or "") or name
+        # 没选加载器 = 老路子：整个版本就装成用户填的那个名字
+        vanilla_name = mc_id if (loader_key and name != mc_id) else name
+
+        # ⚠️ 上一次把原版那层收进 `.mosslight/vanilla/` 了（见下面的
+        # `_finalize_layout`）就先搬回来：安装器（Forge 那几家）和版本 JSON
+        # 都要求原版在 `versions/` 下露着，而且搬回来之后那 25 MB 客户端 jar
+        # 就不用重下了（引擎看到文件在就跳过）。
+        #
+        # ⚠️ "原来就在不在"要在**搬回来之前**记：搬回来的那份也是我们收起来的，
+        # 装完该再收回去（不然用户会发现"那个原版又冒出来了"）。
+        vanilla_was_there = (mc_dir / "versions" / mc_id).is_dir()
+        if standalone.materialize(mc_dir, mc_id):
+            self._note(tr("把原版 {mc} 从 .mosslight 搬回来了", mc=mc_id),
+                       win=self._install_win)
+
         try:
             vj = self._fetch_json(entry.get("url", ""))
             if not vj:
                 raise RuntimeError(tr("拿不到这个版本的 JSON"))
 
-            # ⚠️ 先把版本 JSON 落盘，再开始下别的。
-            # 不写这一步的话：装完只有 jar 没有 json，版本列表认不出来
-            # （它靠 <目录>/<目录>.json 识别），用户看到的就是"下完了但列表里没有"。
-            # 放在下载之前还有个好处：就算后面下载失败，这个版本也已经能被
-            # 识别出来了 —— 可以直接用「补全缺失的文件」把它补完。
-            install_mod.write_version_json(vj, mc_dir / "versions" / name, name)
-
-            # 资源索引：本地有就用本地的（重装时不必再联网取一次），
-            # 没有才去下载它。拿不到就先只下客户端和库。
-            index = install_mod.load_asset_index(mc_dir, vj, fetch=self._fetch_json)
-
-            # 规则过滤复用 launch.py 那套（按当前系统挑库）：
-            # 传 None 会把 Linux/macOS 专用的库也下一遍，白费流量。
-            # 放在函数里 import 是免得模块级多一条 core.launch 的依赖。
+            # 原版 + 可选加载器一整批塞进引擎。
+            # ⚠️ 顺序、落点、两份 JSON 为什么要先落盘、加载器失败为什么不能
+            # 拖累原版 —— 都在 `core/loader_install.install_stack()` 的说明里，
+            # 模组页装整合包走的是同一个函数。
             from core.launch import rules_allow
-            plan = install_mod.plan_version(vj, mc_dir, rules_allow=rules_allow,
-                                            asset_index=index, jar_name=name)
-            install_mod.start_install(plan, manager)
+            plan, loader_plan, loader_error = loader_install.install_stack(
+                mc_id, vj, mc_dir, manager, version_id=name,
+                loader_key=loader_key, loader_version=loader_version,
+                api_version=api_version, rules_allow=rules_allow,
+                fetch=self._fetch_json, vanilla_name=vanilla_name,
+                extra=loader_extra)
+
             manager.start()
             finished = manager.wait_all(timeout=3600)
 
+            # ⚠️ **失败的文件自动再试一轮**（网络抖动很常见）。不试的话就是
+            # "68 个文件里挂了 1 个"→ 整个加载器不装了，用户得自己点下载窗口
+            # 里那个「重试失败的文件」—— 而那时后台线程早跑完了，**重试也
+            # 不会再跑安装器**（2026-09 真跑 Forge 时就是这么卡住的）。
+            # 引擎内部本来就有单文件重试，这一轮是"全都试完还是失败"之后的兜底。
+            if finished and manager.snapshot()["failed"]:
+                self._note(tr("有文件没下下来，再试一轮…"), win=self._install_win)
+                manager.retry_failed()
+                manager.wait_all(timeout=1800)
+
             if finished:
-                natives_dir = plan.version_dir / (name + "-natives")
+                natives_dir = plan.version_dir / (vanilla_name + "-natives")
                 install_mod.extract_natives(plan, natives_dir)
+
+            # ⚠️ 这个标志在上面（搬回来之前）就记好了，见那里的注释
+            vanilla_existed = vanilla_was_there
 
             snap = manager.snapshot()
             if not finished:
@@ -630,15 +743,101 @@ class DownloadPage(TranslatableWidget):
             elif snap["failed"]:
                 self._install_result = tr("安装结束，但有 {n} 个文件失败",
                                           n=snap["failed"])
+                self._install_ok = True        # 大部分装上了，版本列表值得刷
             elif snap["count"] == 0:
                 self._install_result = tr("没有可下载的文件（版本 JSON 不对？）")
+            elif loader_error:
+                self._install_result = tr("原版装好了，但加载器没装上：{err}",
+                                          err=loader_error)
+                self._install_ok = True
+            elif loader_plan is not None and loader_plan.installer:
+                # Forge / NeoForge / OptiFine：文件下完了，**正戏才开始** ——
+                # 得把官方安装器跑起来（要 Java，三分钟起）。这一段
+                # 的进度走下载窗口下半截那个控制台（见 stage_begin）。
+                self._install_result = self._run_installer_stage(
+                    loader_plan, mc_dir, win=self._install_win)
+                self._install_ok = True
+            elif loader_plan is not None:
+                what = loaders_mod.LOADER_NAMES.get(loader_key, loader_key)
+                extra = ""
+                if loader_plan.mods:
+                    extra = tr("，含 {n} 个模组", n=len(loader_plan.mods))
+                self._install_result = tr("安装完成：{name}（含 {loader}{extra}）",
+                                          name=name, loader=what, extra=extra)
+                self._install_ok = True
             else:
                 self._install_result = tr("安装完成：{name}", name=name)
                 self._install_ok = True
+
+            # 加载器装上了 → **把两层合成一个独立目录**（用户 2026-09 要的：
+            # "一个版本一个独立文件夹，分多版本才好管理"）。见
+            # `core/standalone.py`：自包含 JSON + 硬链接的客户端 jar + 原版那层
+            # 收进 `.mosslight/vanilla/`。
+            if self._install_ok and loader_plan is not None and not loader_error:
+                self._finalize_layout(name, mc_id, mc_dir, vanilla_existed,
+                                      win=self._install_win)
         except Exception as e:                          # noqa: BLE001
             self._install_result = tr("安装失败：{err}", err=e)
         finally:
             self._install_done = True
+
+    def _finalize_layout(self, version_id, mc_id, mc_dir, vanilla_existed,
+                         win=None) -> None:
+        """装完之后收尾：合两层 → 原版那层收起来
+
+        ⚠️ 一步失败**不能**把整个安装判死：版本 JSON 还是能用的（顶多多留一层
+        原版目录），所以这里只往控制台写一句，不改 `_install_result`。
+        """
+        if version_id == mc_id:
+            return                    # 名字跟原版撞了，本来就是同一层
+        ok, note = standalone.make_standalone(mc_dir, version_id, mc_id)
+        if note:
+            self._note(note, win=win)
+        if not ok:
+            return
+        tail = standalone.cleanup_vanilla(mc_dir, mc_id,
+                                          created_by_us=not vanilla_existed)
+        if tail:
+            self._note(tail, win=win)
+
+    def _note(self, text: str, win=None) -> None:
+        """往下载窗口下半截那个控制台写一句（没有窗口就丢掉）"""
+        if win is not None and text:
+            win.stage_write(text)
+
+    def _run_installer_stage(self, loader_plan, mc_dir, win=None) -> str:
+        """下载完之后跑官方安装器，返回给人看的结果那句话
+
+        ⚠️ 这一步**能跑好几分钟**，而且跟我们自己的下载引擎没关系（它是
+        一个 Java 子进程）。所以进度不走走下载窗口的进度条，走它下半截那个
+        控制台 —— `stage_begin()` 一开，主线程那边的定时器就不会停了。
+        """
+        what = loaders_mod.LOADER_NAMES.get(loader_plan.key, loader_plan.key)
+        if win is not None:
+            win.stage_begin(tr("正在跑 {name} 的官方安装器…（要几分钟，别关这个窗口）",
+                               name=what))
+            win.stage_write(tr("安装器：{path}", path=loader_plan.installer_jar))
+
+        def _line(text):
+            if win is not None:
+                win.stage_write(text)
+
+        try:
+            final, error = loader_install.finish_installer(
+                loader_plan, mc_dir, on_line=_line,
+                manager=self._install_manager)
+        except Exception as e:                          # noqa: BLE001
+            final, error = "", "%s: %s" % (type(e).__name__, e)
+
+        if error:
+            if win is not None:
+                win.stage_end(tr("{name} 没装上", name=what))
+                win.stage_write(tr("出了点问题：{err}", err=error))
+            return tr("原版装好了，但 {name} 没装上：{err}", name=what, err=error)
+        if win is not None:
+            win.stage_end(tr("{name} 装好了", name=what))
+            win.stage_write(tr("完成：{name}", name=final))
+        return tr("安装完成：{name}（含 {loader}）", name=final, loader=what)
 
     def _poll_install(self):
         """主线程收结果：报状态、必要时刷新版本列表、放掉窗口"""
@@ -647,6 +846,10 @@ class DownloadPage(TranslatableWidget):
         self._install_timer.stop()
         self._install_done = False
         self.install_page.set_status(self._install_result or tr("安装结束"))
+        # 列表页那行"正在安装…"也要收掉 —— 现在用户多半**正看着列表**
+        # （任务一开始就自动退回来了，见 _on_install_requested），
+        # 不收的话那句话会一直挂在那儿，看着像还在装。
+        self.status.setText(self._install_result or tr("安装结束"))
 
         if self._install_win is not None:
             self._install_win.stop()        # 停掉它的定时器再放掉引用

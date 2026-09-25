@@ -1,6 +1,6 @@
 """主窗口：侧边栏 + 页面堆栈"""
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QPropertyAnimation, QPoint, QEasingCurve
 from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 
@@ -18,6 +18,7 @@ from ui.pages.personalize_page import PersonalizePage
 from ui.pages.settings_page import SettingsPage
 from ui.pages.version_settings_page import VersionSettingsPage
 from ui.pages.versions_page import VersionsPage
+from ui.widgets import background_canvas, card_style
 from ui.widgets.sidebar import Sidebar
 
 
@@ -47,6 +48,14 @@ class MainWindow(QMainWindow):
         self.stack.setObjectName("PageStack")
         layout.addWidget(self.stack, 1)
 
+        # ---------- 背景画布（移植自 experiments/Downloading mod test）----------
+        # 把整个界面装进一个会自己画背景图/背景色的容器里（见
+        # `ui/widgets/background_canvas.py`）。⚠️ 必须在 setCentralWidget(root)
+        # 之后做 —— `attach()` 会把当前的中央控件摘下来挪进画布，再让画布当中央控件。
+        # ⚠️ 还得让页面透明（app.qss 里 QWidget 不再填页面色），不然背景图会被
+        # 页面自己的底色整个盖掉 —— 实验项目踩过这个坑（第 6 条）。
+        self.canvas = background_canvas.attach(self)
+
         self.pages = {
             "home": HomePage(self.account_manager),
             "download": DownloadPage(),
@@ -63,6 +72,8 @@ class MainWindow(QMainWindow):
 
         # 「版本设置」页的「返回」回到**进来的那一页**
         self._settings_return = "versions"
+        # 页面切换动画（见 _slide_page）；必须在第一次 switch_page 之前建好
+        self._page_anim = None
 
         # ---------- 信号 ----------
         self.sidebar.page_changed.connect(self.switch_page)
@@ -105,6 +116,8 @@ class MainWindow(QMainWindow):
         personalize = self.pages["personalize"]
         personalize.language_changed.connect(self.set_language)
         personalize.theme_changed.connect(self.load_styles)
+        # 个性化页里的「背景设置」改游戏目录时也要重扫（跟设置页 / 版本页同一条路）
+        personalize.config_changed.connect(self._on_config_changed)
 
         # 系统深浅色变了就重刷（只有"跟随系统"模式才真的会动样式）
         try:
@@ -124,15 +137,71 @@ class MainWindow(QMainWindow):
 
     # ---------- 导航 ----------
 
+    # 页面切换动画：新页面从右边滑进来（移植自实验项目的 main_window）
+    SLIDE_MS = 240
+
     def switch_page(self, key: str):
         page = self.pages.get(key)
         if page is None:
             return
+        previous = self.stack.currentWidget()
+        first_show = previous is None
         self.stack.setCurrentWidget(page)
         self.sidebar.set_active(key)
         # 切到版本页 / 启动页时刷新一下（版本列表和面板上的信息都来自扫描）
         if key in ("versions", "home"):
             page.reload_versions()
+        # 新页面横向滑进来（第一次显示不滑 —— 开机那一下整页飞进来很怪；
+        # 关了动效也不滑 —— 整页位移动画是最吃渲染的一处）
+        if not first_show and previous is not page and self._anim_enabled():
+            self._slide_page(page)
+
+    def _anim_enabled(self) -> bool:
+        """动效总开关（"关闭动效省性能"）。关掉时切页直接摆到位，不建动画"""
+        from core import appearance
+        return appearance.get_anim_enabled()
+
+    def _slide_page(self, page):
+        """让 `page` 从右边（窗口外）滑到位
+
+        ⚠️ 三件事都不能省（实验项目里逐条试出来的，见它的使用说明第 8 节）：
+          1. 整页横向移动是"每帧重画整页"，最吃渲染 —— 动画期间
+             `setUpdatesEnabled(False)`，Qt 就只在结束时画一次，掉帧明显少
+          2. 动画**必须先 stop 掉上一条**：上一条没播完就切页，两条会打架
+          3. 结束时把位置钳在 (0, 0) 并把重绘打开 —— 漏了就会"页面再也不刷新"
+        """
+        if self._page_anim is not None:
+            self._page_anim.stop()
+            self._page_anim = None
+        page.setUpdatesEnabled(False)
+        anim = QPropertyAnimation(page, b"pos", self)
+        anim.setDuration(self.SLIDE_MS)
+        anim.setStartValue(QPoint(page.width() or self.width(), 0))
+        anim.setEndValue(QPoint(0, 0))
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.finished.connect(lambda: self._finish_slide(page))
+        self._page_anim = anim
+        anim.start()
+
+    def _finish_slide(self, page):
+        page.move(0, 0)
+        page.setUpdatesEnabled(True)
+        page.update()
+        self._page_anim = None
+
+    def apply_appearance(self):
+        """外观设置改完调它：背景重画 + 卡片透明度按新值重套
+
+        ⚠️ 卡片是各自 setStyleSheet 的（透明度写在那份样式里），不挨个刷新的话
+        只有**新加载出来**的卡片是新透明度 —— 用户会以为设置没生效。
+        """
+        if getattr(self, "canvas", None) is not None:
+            self.canvas.reload()
+        for page in self.pages.values():
+            refresh = getattr(page, "refresh_card_style", None)
+            if callable(refresh):
+                refresh()
+        self.load_styles()          # 卡片透明度也可能写在全局样式里
 
     def _on_installed(self):
         """装完一个新版本：跟"改了游戏目录"一样，重扫所有跟版本相关的页面"""
@@ -266,6 +335,16 @@ class MainWindow(QMainWindow):
         left = theme.unresolved(qss)
         if left:
             print(f"[UI] app.qss 里有没被替换的变量（写错名字了？）: {left}")
+
+        # 卡片透明度：追加一段覆盖块（排在最后才压得住原来的 @bg_card@）。
+        # 不透明度 100% 时它是空串 —— 别白写一段样式。
+        qss += card_style.opacity_stylesheet(
+            palette=theme.palette(mode, config.get("accent_color", "")))
+        # 外壳（左侧竖栏 / 分类栏）半透明：只在设了背景图时有内容。
+        # ⚠️ 排在卡片那段**后面**：外壳有自己固定的不透明度，不该被
+        # "卡片透明度"那一档带走。
+        qss += card_style.chrome_stylesheet(
+            palette=theme.palette(mode, config.get("accent_color", "")))
 
         self.setStyleSheet(qss)
 
