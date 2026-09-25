@@ -189,24 +189,30 @@ def current_language() -> str:
     return _current_lang
 
 
-def tr(text: str, **fmt) -> str:
+def tr(source: str, **fmt) -> str:
     """取当前语言的文案
 
-    text 是**中文源文案**。查不到翻译就原样返回中文 ——
+    source 是**中文源文案**。查不到翻译就原样返回中文 ——
     所以调错了、漏翻了，用户看到的也只是中文，不会看到 key。
 
     带变量的文案要走参数，不要自己拼 f-string：
         tr("已选中 {name}", name=name)
+
+    ⚠️ 第一个参数叫 `source` 而**不是** `text`：占位符名是通过 `**fmt` 传进来的，
+    跟形参重名就会变成 `tr() got multiple values for argument 'text'`
+    （2026-09 真踩过：`tr("版本信息…{text}", text=...)` 直接抛异常，
+    点「开始游戏」就崩）。`text` 是个很自然的占位符名，所以形参别占它。
+    `i18n_check.py` 会把每个 key 的占位符都真调一遍，重名会被测试抓住。
     """
-    out = _strings.get(text)
+    out = _strings.get(source)
     if out is None:
-        out = text
+        out = source
     if fmt:
         try:
             out = out.format(**fmt)
         except (KeyError, IndexError):
             # 译文里的占位符和源文案对不上时，宁可显示原文也不要抛异常
-            out = text.format(**fmt)
+            out = source.format(**fmt)
     return out
 
 

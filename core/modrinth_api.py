@@ -213,6 +213,33 @@ def get_project_versions(project_id: str) -> list:
                   key=lambda v: str(v.get("date_published") or ""), reverse=True)
 
 
+def filter_versions(versions, mc_version: str = "", loader: str = "") -> list:
+    """从一个项目的版本列表里挑出**匹配游戏版本 + 加载器**的（顺序不变 = 新的在前）
+
+    ⚠️ 按 `game_versions` / `loaders` 两个字段筛，**不在服务端筛**：
+    `/project/<id>/version` 一次给全部版本，本地筛省一次往返，而且这套筛法
+    跟详情页、Fabric API 那几个入口共用。
+
+    ⚠️ 筛不出东西就**返回空**，别"退而求其次"随便给一个 —— 装错加载器的
+    mod 只会让游戏起不来，比"没得选"更糟（这也是 `core/loaders.py` 那条
+    "拉不到 ≠ 还没做"的同一种分寸）。
+    """
+    mc = str(mc_version or "").strip()
+    want = str(loader or "").strip().lower()
+    out = []
+    for v in versions or []:
+        if not isinstance(v, dict):
+            continue
+        if mc and mc not in [str(x) for x in (v.get("game_versions") or [])]:
+            continue
+        if want:
+            have = [str(x).lower() for x in (v.get("loaders") or [])]
+            if want not in have:
+                continue
+        out.append(v)
+    return out
+
+
 def primary_file(version: dict):
     """版本里该下的那个文件（优先 primary，没有就第一个）
 

@@ -288,25 +288,37 @@ class ModpackPlan:
     def total_bytes(self) -> int:
         return sum(f.size or 0 for f in self.files)
 
-    def version_json(self, instance_name: str, overrides_written: int = 0) -> dict:
-        """这个实例的版本 JSON（写进 `versions/<名字>/<名字>.json`）
+    def modpack_meta(self, overrides_written: int = 0) -> dict:
+        """版本 JSON 里我们自己那段 `modpack` 扩展字段
 
-        作用只有一个：**让启动器的版本列表认得这个实例**
-        （`core/versions.py` 靠"目录里有没有同名 json + 有没有 id"来判定）。
-
-        ⚠️ **原版和加载器不由这里装、也不在这里下载**（用户 2026-09 明确：
-        整合包这一路的职责到"把整合包里的文件装好"为止，原版和加载器他自己装）。
-        所以：
-          · `inheritsFrom` **留空** —— 它现在还没有父版本可指。
-            用户装好原版之后，可以在版本设置里指过去（或后续做"补全"时接上）。
-          · `mainClass` / `libraries` 也是空的：真正的值在父版本 + 加载器里。
-        也就是说这份 JSON 是**"还没接上游戏本体"的实例**，启动器能列出它、
-        但直接点启动会缺 `mainClass` —— 这是**如实反映现状**，不是 bug。
-
-        `modpack` 那一段是我们自己的扩展字段：把"这个包要什么原版 / 什么加载器"
-        记下来，用户手动装的时候能对上号，排查问题也看得见来源。
+        把"这个包要什么原版 / 什么加载器 / 什么来源"记下来 —— 用户手动装的时候
+        能对上号，排查问题也看得见来源。`version_json()` 和"装完加载器之后
+        写进去的那份 JSON"（`ui/pages/mods_page.py`）用的是同一个它，
+        两边的字段就不会各写各的。
         """
         loader_key, loader_version = self.loader()
+        return {
+            "name": self.name,
+            "versionId": self.version_id,
+            "minecraft": self.minecraft,
+            "loader": loader_key,
+            "loaderVersion": loader_version,
+            "summary": self.summary,
+            "overridesWritten": overrides_written,
+        }
+
+    def version_json(self, instance_name: str, overrides_written: int = 0) -> dict:
+        """**兜底**用的版本 JSON：只有整合包元数据，没有 mainClass / 库
+
+        什么时候用它：这个包要的加载器我们**装不了**（Forge / NeoForge /
+        OptiFine / 根本没写加载器）—— 那时实例里只有整合包的文件，
+        `inheritsFrom` 也没有父版本可指，只能"能列出来、点启动会缺 mainClass"。
+        能装的情况（Fabric / Quilt）走 `core/loader_install.build_plan()`，
+        它会写一份**真能启动**的 profile，再把 `modpack_meta()` 塞进去。
+
+        ⚠️ 这份 JSON 是**如实反映现状**，不是 bug：装完界面会明确说
+        「加载器没装上，实例还不能直接启动」。
+        """
         return {
             "id": instance_name,
             "type": "release",
@@ -314,15 +326,7 @@ class ModpackPlan:
             "time": "1970-01-01T00:00:00+00:00",
             "mainClass": "",
             "libraries": [],
-            "modpack": {
-                "name": self.name,
-                "versionId": self.version_id,
-                "minecraft": self.minecraft,
-                "loader": loader_key,
-                "loaderVersion": loader_version,
-                "summary": self.summary,
-                "overridesWritten": overrides_written,
-            },
+            "modpack": self.modpack_meta(overrides_written),
         }
 
     def download_tasks(self, instance_dir) -> "list[dict]":
@@ -352,12 +356,41 @@ class ModpackPlan:
 # 解析
 # ============================================================
 
+def _find_index(zf: zipfile.ZipFile) -> "tuple[str, str]":
+    """找到 `modrinth.index.json` 并返回 `(条目名, 一级目录前缀)`
+
+    ⚠️ **允许外面套一层文件夹**：`modrinth.index.json` 可能在根上，也可能在
+    `<某个文件夹>/` 底下（用户自己重打包、或者解压之后再压一遍就会这样）。
+    PCL 也是这么认的（`archiveBaseFolder`，见 `ModModpack.cs`），
+    只认根目录的话这类包会直接报「这不是整合包」。
+    前缀同时决定 `overrides/` 在哪儿，所以必须一路带下去。
+
+    ⚠️ 只看**一级**：再深的嵌套不认 —— 那更像"压缩包里塞了别的东西"，
+    猜下去不如老实报错。多个候选时取名字最短的那个（最浅）。
+    """
+    candidates = []
+    for name in zf.namelist():
+        if not isinstance(name, str):
+            continue
+        if name == INDEX_NAME:
+            candidates.append("")
+        elif name.endswith("/" + INDEX_NAME):
+            head = name[:-len(INDEX_NAME)]
+            if head.count("/") == 1 and head.endswith("/"):
+                candidates.append(head)
+    if not candidates:
+        return "", ""
+    base = sorted(candidates, key=len)[0]
+    return base + INDEX_NAME, base
+
+
 def _read_index(zf: zipfile.ZipFile) -> dict:
     """读出 `modrinth.index.json` 并做基本校验"""
-    try:
-        raw = zf.read(INDEX_NAME)
-    except KeyError:
+    entry, _base = _find_index(zf)
+    if not entry:
         raise ModpackError(tr("这不是整合包：ZIP 里没有 {name}", name=INDEX_NAME))
+    try:
+        raw = zf.read(entry)
     except (zipfile.BadZipFile, OSError) as e:
         raise ModpackError(tr("整合包读不了：{err}", err=e))
 
@@ -385,10 +418,13 @@ def _read_index(zf: zipfile.ZipFile) -> dict:
     return data
 
 
-def build_plan(index: dict, zf: "zipfile.ZipFile | None" = None) -> ModpackPlan:
+def build_plan(index: dict, zf: "zipfile.ZipFile | None" = None,
+               base: str = "") -> ModpackPlan:
     """把 `modrinth.index.json` 变成一个 `ModpackPlan`
 
     `zf` 传进来时顺带扫一遍覆盖层目录（不传就只出 files 那部分清单）。
+    `base` 是一级目录前缀（见 `_find_index`）：整合包外面套了一层文件夹时，
+    `overrides/` 也在那一层底下。
     """
     deps = index.get("dependencies")
     if not isinstance(deps, dict):
@@ -441,20 +477,21 @@ def build_plan(index: dict, zf: "zipfile.ZipFile | None" = None) -> ModpackPlan:
         plan.warnings.append(tr("整合包没说要用哪个 Minecraft 版本"))
 
     if zf is not None:
-        plan.overrides = find_overrides(zf.namelist())
+        plan.overrides = find_overrides(zf.namelist(), base=base)
     return plan
 
 
-def find_overrides(names) -> "list[tuple]":
+def find_overrides(names, base: str = "") -> "list[tuple]":
     """从 zip 条目名里找出覆盖层 → `[(前缀, 相对路径), ...]`
 
     ⚠️ 返回值是**列表且按 OVERRIDE_DIRS 的顺序**（后面的要盖前面的），
     调用方按顺序展开就行，不要自己去排序 —— 排序会打乱覆盖优先级。
     ⚠️ 不在这里判断"文件还是目录"，也不读内容：调用方直接按条目名展开。
+    `base` 是一级目录前缀（`overrides/` 跟着 index 走，见 `_find_index`）。
     """
     out = []
     for prefix in OVERRIDE_DIRS:
-        head = prefix + "/"
+        head = base + prefix + "/"
         for name in names or []:
             if not isinstance(name, str) or not name.startswith(head):
                 continue
@@ -463,7 +500,7 @@ def find_overrides(names) -> "list[tuple]":
             rel = name[len(head):]
             if not rel or not is_safe_relpath(rel):
                 continue
-            out.append((prefix, rel))
+            out.append((base + prefix, rel))
     return out
 
 
@@ -496,7 +533,8 @@ def plan_from_bytes(blob: bytes, instance_dir=None) -> ModpackPlan:
     try:
         with zipfile.ZipFile(io.BytesIO(blob)) as zf:
             index = _read_index(zf)
-            return build_plan(index, zf)
+            _entry, base = _find_index(zf)
+            return build_plan(index, zf, base=base)
     except zipfile.BadZipFile as e:
         raise ModpackError(tr("整合包不是有效的 ZIP（下载坏了？）：{err}", err=e))
 
