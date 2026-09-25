@@ -30,7 +30,15 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install PyQt6 pyinstaller
+          # ⚠️ 必须装 requirements.txt，别手写包名：以前这里写的是
+          # pip install PyQt6 pyinstaller，**漏了 requests** —— 而
+          # ui/pages/download_page.py 在模块级就 import 它。PyInstaller 打不出
+          # 没装的模块，本地跑源码看不出来（本地按 requirements 装齐了），CI 也
+          # 照样"构建成功"，只有下载 exe 的人一开就崩：
+          #     ModuleNotFoundError: No module named 'requests'
+          # pyinstaller 单独装：它在 requirements.txt 里是注释掉的（只有出 exe 才要）。
+          pip install -r requirements.txt
+          pip install pyinstaller
 
       # exe 的「属性 → 详细信息」里显示的版本号/产品名来自这个文件
       - name: 生成版本信息
