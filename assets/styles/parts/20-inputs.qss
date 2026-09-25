@@ -236,17 +236,34 @@ QTableCornerButton::section {
     border: none;
 }
 
-/* ============================ 滚动条 ============================ */
+/* ============================ 滚动条 ============================
+   ⚠️ 这里是**全局**的：搜索结果、版本列表、详情页版本分组、设置页、日志窗口
+   全都用这一份。改它会一次性影响所有滚动区。
+
+   箭头按钮（add-line / sub-line）原来是 `height: 0; width: 0` —— 也就是
+   刻意做成"没有箭头"的极简滚动条。2026-09 用户要求**把上下箭头显出来**
+   （"顶满的宽度还是没有 ↑ ↓ 按钮"），所以恢复了按钮并给它配了 SVG 箭头。
+
+   ⚠️ 用 `@ICONS_SUFFIX@` 而不是死写文件名：Qt 的 SVG **不支持 currentColor**，
+   箭头颜色只能写死在文件里，深色底和浅色底需要不同灰度，所以有
+   `chevron-up.svg` / `chevron-up-light.svg` 两份（同 ui/icons.py 的约定）。
+   这个后缀由 ui/main_window.py 按当前主题替换，主题一变它会重跑。 */
 
 QScrollBar:vertical {
     background: transparent;
+    /* ⚠️ 保持 10px —— 加箭头**不能**靠加宽滚动条：宽了就会把内容挤窄
+       （用户 2026-09 报「导航项变窄了」就是这么来的）。
+       箭头按钮做成 10px 见方，正好塞进原来的宽度里。 */
     width: 10px;
-    margin: 2px;
+    margin: 2px 0 2px 0;
 }
 QScrollBar::handle:vertical {
     background-color: @border_control@;
     border-radius: 5px;
     min-height: 30px;
+    /* 左右各留 2px：handle 比轨道窄一点，两边能看到轨道底色，
+       而且宽度正好跟上下按钮对齐 */
+    margin: 0 2px 0 2px;
 }
 QScrollBar::handle:vertical:hover {
     background-color: @border_hover@;
@@ -254,22 +271,68 @@ QScrollBar::handle:vertical:hover {
 QScrollBar:horizontal {
     background: transparent;
     height: 10px;
-    margin: 2px;
+    margin: 0 2px 0 2px;
 }
 QScrollBar::handle:horizontal {
     background-color: @border_control@;
     border-radius: 5px;
     min-width: 30px;
+    margin: 2px 0 2px 0;
 }
 QScrollBar::handle:horizontal:hover {
     background-color: @border_hover@;
 }
-QScrollBar::add-line, QScrollBar::sub-line {
-    height: 0;
-    width: 0;
-    background: none;
+
+/* 上下 / 左右那两个箭头按钮。
+   ⚠️ 尺寸必须 ≤ 滚动条宽度（10px），否则 Qt 会把滚动条自身撑宽、把内容挤窄。
+   16px 高是给纵向按钮的，宽度交给滚动条自己定（= 10px）。 */
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    background: transparent;
     border: none;
+    height: 16px;
+    subcontrol-origin: margin;
 }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    background: transparent;
+    border: none;
+    width: 16px;
+    subcontrol-origin: margin;
+}
+/* 悬停时给按钮一块淡底，让"这里能点"看得见 */
+QScrollBar::add-line:vertical:hover, QScrollBar::sub-line:vertical:hover,
+QScrollBar::add-line:horizontal:hover, QScrollBar::sub-line:horizontal:hover {
+    background-color: @bg_elevated@;
+    border-radius: 4px;
+}
+/* 箭头图标。⚠️ 8px 是调出来的：SVG 本身是 12×12，按 10px 渲染会顶到滚动条
+   两边（滚动条只有 10px 宽），看着像被切掉；8px 时形态完整、留白也舒服。 */
+QScrollBar::up-arrow:vertical {
+    image: url(@ICONS@/chevron-up@ICONS_SUFFIX@.svg);
+    width: 8px;
+    height: 8px;
+}
+QScrollBar::down-arrow:vertical {
+    image: url(@ICONS@/chevron-down@ICONS_SUFFIX@.svg);
+    width: 8px;
+    height: 8px;
+}
+QScrollBar::left-arrow:horizontal {
+    image: url(@ICONS@/chevron-up@ICONS_SUFFIX@.svg);
+    width: 8px;
+    height: 8px;
+}
+QScrollBar::right-arrow:horizontal {
+    image: url(@ICONS@/chevron-down@ICONS_SUFFIX@.svg);
+    width: 8px;
+    height: 8px;
+}
+/* 禁用态：滚不动的时候箭头淡一点，别看着像能点 */
+QScrollBar::up-arrow:vertical:disabled, QScrollBar::down-arrow:vertical:disabled,
+QScrollBar::left-arrow:horizontal:disabled,
+QScrollBar::right-arrow:horizontal:disabled {
+    image: none;
+}
+
 QScrollBar::add-page, QScrollBar::sub-page {
     background: none;
 }
