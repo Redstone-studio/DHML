@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller
+build/
+build-onefile/
+dist/
+dist-onefile/
+*.spec
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 本地配置（正常情况下不会出现在仓库根目录，防手滑）
+config.json
+accounts.json
+versions.json
+
+# 便携模式的数据目录：从源码跑的时候，启动器目录（= 仓库根）放一个
+# portable.txt 就会在这里生成 Mosslight/，别把它提交上去
+# （MCLuncher 是改名前的目录名，留着是怕老工作区还有残留）
+Mosslight/
+MCLuncher/
+portable.txt
