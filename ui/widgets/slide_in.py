@@ -29,7 +29,9 @@
 ## 用法
 
     from ui.widgets.slide_in import SlideInRow, StaggerReveal
-    from ui.widgets.anim_prefs import preset
+    from core.anim_prefs import preset          # ⚠️ 是 core，不是 ui.widgets
+                                                # （实验项目里它在 ui/widgets/ 下，
+                                                #   照抄那边会 import 不到）
 
     p = preset("slide_up")
     stagger = StaggerReveal(self, interval=p.interval, initial_offset=p.offset,
