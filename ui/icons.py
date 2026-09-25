@@ -144,6 +144,22 @@ def custom_icon_path(version: dict):
     return None
 
 
+def action_icon(name: str) -> QIcon:
+    """给按钮用的动作图标（现在有 folder / plus-circle / tool）
+
+    ⚠️ 每个图标都有 `-dark` / `-light` 两份：**Qt 的 svg 不支持 currentColor**，
+    颜色只能写死在文件里，而深色卡片底和白色卡片底需要不同的灰度。
+    主题从 ui/theme_state.current_mode() 拿（它读 config + 系统深浅色），
+    所以不管在哪调结果都一致。
+
+    图标文件缺了就返回**空 QIcon** —— 按钮上没图标，也比显示一个空白方块强。
+    """
+    from ui.theme_state import current_mode
+
+    path = Path(resource_path("assets", "icons", f"{name}-{current_mode()}.svg"))
+    return QIcon(str(path)) if path.is_file() else QIcon()
+
+
 def screen_dpr(widget=None) -> float:
     """当前屏幕缩放（125% 的系统返回 1.25）
 

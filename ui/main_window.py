@@ -12,6 +12,7 @@ from core.resources import load_stylesheet, resource_path
 from ui.dialogs.new_account_dialog import NewAccountDialog
 from ui.icons import app_icon
 from ui.pages.accounts_page import AccountsPage
+from ui.pages.download_page import DownloadPage
 from ui.pages.home_page import HomePage
 from ui.pages.personalize_page import PersonalizePage
 from ui.pages.settings_page import SettingsPage
@@ -27,8 +28,8 @@ class MainWindow(QMainWindow):
         # 界面上自己叫的名字（侧边栏左上角）短一点，是 APP_NAME
         self.setWindowTitle(APP_DISPLAY_NAME)
         self.setWindowIcon(app_icon())
-        self.resize(1280, 820)
-        self.setMinimumSize(1040, 620)
+        self.resize(1360, 860)
+        self.setMinimumSize(1160, 660)
 
         self.account_manager = AccountManager()
 
@@ -48,6 +49,7 @@ class MainWindow(QMainWindow):
 
         self.pages = {
             "home": HomePage(self.account_manager),
+            "download": DownloadPage(),
             "versions": VersionsPage(),
             # 版本设置是**整页**不是弹窗（2026-09 改）：从启动面板或版本页进来，
             # 侧边栏不给它入口 —— 它属于"某一个版本"，不是第四个导航项
