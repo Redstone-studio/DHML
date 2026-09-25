@@ -10,7 +10,7 @@
 cd "D:\DHML-src\experiments\Downloading mod test"
 python main.py
 ```
-
+-（这是我的项目目录名字不要在意）
 依赖：`PyQt6` + `requests`（和根项目一致）。要求联网（Modrinth API）。
 
 数据存在 `%APPDATA%\MosslightModTest\`：
