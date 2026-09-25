@@ -99,8 +99,13 @@ FORWARD_LIMIT = 300
 
 # 安装器的套话：它每次失败都打这一句，信息量为零，真正的原因在上一行
 GENERIC_ERRORS = ("There was an error during installation",)
-# 安装器默认超时（秒）——实测 Forge 1.20.1 要 200 秒左右，给足余量
-DEFAULT_TIMEOUT = 1800
+# 安装器默认超时（秒）
+# ⚠️ 这个数字按"最坏情况的网络"给：实测 Forge 1.20.1 顺利时 200 秒就完，
+# 但网络抽风时**安装器自己要下 36 个库**，我们这边只能干等 —— 用户 2026-09
+# 真机上就撞过一次：`maven.minecraftforge.net` 把 guava 下到一半掐断、
+# 重试几次后安装器直接放弃（那是它自己的失败，不是超时）。
+# 给 2 小时是为了"宁可慢也别被我方掐死"（正常根本用不到）。
+DEFAULT_TIMEOUT = 7200
 # 没有 launcher_profiles.json 时造一份最小的（安装器只要求它存在且是个 JSON）
 LAUNCHER_PROFILES = {
     "profiles": {},
@@ -116,6 +121,24 @@ class SetupError(RuntimeError):
 # ============================================================
 # 1. 下载地址
 # ============================================================
+
+def forge_maven_url(mc_version: str, loader_version: str) -> str:
+    """Forge 安装器在**官方 maven** 上的地址（`installer_url` 的备用地址）
+
+    ⚠️ 产物版本号有两套写法（实测 2026-09）：
+      · 1.13 起（含 1.16.5 / 1.20.1）：`<mc>-<forge>`，如 `1.20.1-47.4.0`
+      · 老版本（1.7.10 / 1.8.9 那批）：**多一个后缀** `<mc>-<forge>-<mc>`，
+        如 `1.7.10-10.13.4.1614-1.7.10`（不带后缀是 404）
+    所以这里按 mc 版本自己认，认错了也只是这个备用地址 404 —— 主地址还能用。
+    """
+    mc = str(mc_version or "").strip()
+    lv = str(loader_version or "").strip()
+    _LEGACY = ("1.8.9", "1.8.8", "1.8", "1.7.10", "1.7.2", "1.6.4", "1.6.2",
+               "1.5.2")
+    artifact = "%s-%s-%s" % (mc, lv, mc) if mc in _LEGACY else "%s-%s" % (mc, lv)
+    return ("https://maven.minecraftforge.net/net/minecraftforge/forge/%s/"
+            "forge-%s-installer.jar" % (artifact, artifact))
+
 
 def installer_url(mc_version: str, key: str, loader_version: str,
                   extra: dict = None) -> str:
@@ -453,6 +476,78 @@ def new_version_dirs(mc_dir, before) -> "list[str]":
     return sorted(now - set(before or ()))
 
 
+def installer_output_dirs(mc_dir, key: str, mc_id: str,
+                          loader_version: str = "") -> "list[str]":
+    """安装器**自己命名**的那套目录（`1.20.1-forge-47.4.10` 这种）
+
+    ⚠️ 为什么需要它：`new_version_dirs()` 只能认出"这次新冒出来的目录"。
+    可是**重跑**的时候（上一次装到一半失败、或者我们没接住），安装器那套
+    目录**上次就建好了** —— 于是 `new_version_dirs()` 返回空、我们会说
+    "安装器跑完了，但没看到新的版本目录"，白跑一趟。
+    （用户 2026-09 真机上就撞上了：Forge 第一次因为 guava 下残而失败，
+    第二次重跑时那个 `1.20.1-forge-47.4.10` 已经存在。）
+
+    挑法（从严到宽）：
+      1. 名字里带**这个加载器版本号**的（`…-47.4.10`）—— 最准，优先
+      2. 退一步：名字里的关键字对得上，**而且 JSON 里的库也对得上**
+         （`net.neoforged` → NeoForge，`optifine:` → OptiFine，
+         既没有 neoforged 也没有 optifine → Forge）
+    都要求：不是原版目录本身、目录名以 `<游戏版本>-` 开头、里面有 JSON。
+
+    ⚠️ 第 2 步的"看库"不能省：NeoForge 在 1.20.1 那代**就叫 `forge-47.1.x`**
+    （历史命名），只看名字里的 "forge" 会把一个正牌 Forge 目录错认成 NeoForge，
+    然后给它改名叫 `1.20.1-NeoForge_…` —— 名字一错，mod 落点反查全跟着错。
+    """
+    key = (key or "").lower()
+    mc_id = str(mc_id or "").strip()
+    lv = str(loader_version or "").strip()
+    if not (mc_id and key):
+        return []
+    root = Path(mc_dir) / "versions"
+    try:
+        folders = [p for p in root.iterdir() if p.is_dir()]
+    except OSError:
+        return []
+
+    def _lib_names(folder, name):
+        """这个版本 JSON 里所有库的名字（读不了就给空表）"""
+        path = folder / ("%s.json" % name)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            return []
+        return [str(l.get("name") or "")
+                for l in (data.get("libraries") or []) if isinstance(l, dict)]
+
+    def _matches_loader(name, libs) -> bool:
+        low = name.lower()
+        has_neo = any(n.startswith("net.neoforged") for n in libs)
+        has_of = any(n.startswith("optifine:") for n in libs)
+        if key == "neoforge":
+            return "neoforge" in low or has_neo
+        if key == "optifine":
+            return "optifine" in low or has_of
+        if key == "forge":
+            # 名字里带 forge 还不算 —— 得排除 NeoForge 那两个特征
+            return "forge" in low and "neoforge" not in low and not has_neo
+        return key in low
+
+    exact, loose = [], []
+    for folder in sorted(folders):
+        name = folder.name
+        low = name.lower()
+        if low == mc_id.lower() or not low.startswith(mc_id.lower() + "-"):
+            continue
+        if not (folder / ("%s.json" % name)).is_file():
+            continue
+        if lv and lv.lower() in low:
+            exact.append(name)
+            continue
+        if _matches_loader(name, _lib_names(folder, name)):
+            loose.append(name)
+    return exact or loose
+
+
 def verify_installed(mc_dir, version_id: str, mc_id: str = "") -> "tuple[bool, str]":
     """装完校验：这个版本目录**真的能用**吗（`BUGS.md` 的 BUG-04）
 
@@ -549,3 +644,64 @@ def is_installer_jar(path) -> bool:
         return bool({"install_profile.json", "version.json"} & names)
     except (OSError, zipfile.BadZipFile):
         return False
+
+
+# ============================================================
+# 5. ⚠️ 替安装器先把它的库下好（国内网络的救命稻草）
+# ============================================================
+
+def installer_library_tasks(installer_jar, mc_dir) -> list:
+    """安装器**自己要下的那些库** → 变成我们下载引擎的任务列表
+
+    为什么要抢它的活：安装器从 `maven.minecraftforge.net` 下它那 36 个库，
+    那个地址在国内很容易**下到一半被掐断**（`SocketTimeoutException: Read
+    timed out`），然后它重试几次就**整个放弃**：
+
+        These libraries failed to download. Try again.
+        com.google.guava:guava:25.1-jre
+        There was an error during installation
+
+    用户 2026-09 真机上就是这么失败的（guava 只下到 1.72 MB / 2.61 MB，
+    sha1 对不上）→ 整个整合包装不上加载器。
+
+    我们的引擎有 BMCLAPI 镜像（`maven.minecraftforge.net → bmclapi/maven`）、
+    有重试、**而且认 sha1**，所以先替它下好：安装器发现
+    `File exists: Checksum validated.` 就直接跳过，根本不会再走那批网络。
+    （这条是从安装器的字节码里确认的：`DownloadUtils` 会校验已有文件、
+    校验不过就删掉重下 —— 所以"我们先下好"跟"它自己下的"等价，只是更稳。）
+
+    解析的是 `install_profile.json` 里的 `libraries[].downloads.artifact`
+    （`{path, url, sha1, size}`）；没有 artifact 的（processor 用的、
+    靠 `{LIBRARY_DIR}` 拼的老式条目）跳过。
+    """
+    from core import install as install_mod
+
+    installer_jar = Path(installer_jar)
+    mc_dir = Path(mc_dir)
+    try:
+        with zipfile.ZipFile(installer_jar) as zf:
+            if "install_profile.json" not in zf.namelist():
+                return []
+            data = json.loads(zf.read("install_profile.json").decode(
+                "utf-8-sig", "replace"))
+    except (OSError, ValueError, zipfile.BadZipFile):
+        return []
+    if not isinstance(data, dict):
+        return []
+
+    tasks = []
+    for lib in (data.get("libraries") or []):
+        if not isinstance(lib, dict):
+            continue
+        artifact = ((lib.get("downloads") or {}).get("artifact") or {})
+        rel = str(artifact.get("path") or "").strip()
+        url = str(artifact.get("url") or "").strip()
+        if not (rel and url):
+            continue
+        tasks.append(install_mod.Task(
+            url=url, path=mc_dir / "libraries" / rel,
+            sha1=artifact.get("sha1", ""), size=artifact.get("size", 0),
+            label=rel.replace("\\", "/").rsplit("/", 1)[-1],
+            kind=tr("安装器库")))
+    return tasks
+
