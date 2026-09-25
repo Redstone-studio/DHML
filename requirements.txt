@@ -1,0 +1,8 @@
+# 运行时依赖
+PyQt6>=6.6
+# 下载引擎用它（core/download.py）。本地实测 2.34.2 可用；
+# 它自带 urllib3/certifi，PyInstaller 能自动收进去。
+requests>=2.31
+
+# 打包（本地出 exe 时才需要，CI 里由 workflow 单独安装）
+# pyinstaller>=6.0
