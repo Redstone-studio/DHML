@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号（如 v0.1.6-alpha）'
+        # ⚠️ 这两个是**静态**默认值：workflow_dispatch 的 default 不支持表达式，
+        # 没法从 core/app_info.py 里读。所以每次发版顺手改这两行 ——
+        # 不然手一滑点下去，就把上一次的版本号发出去了。
+        description: '版本号（如 v1.0.0）'
         required: true
-        default: 'v0.1.6-alpha'
+        default: 'v1.0.0'
       prerelease:
         description: '是否为预发布版'
         type: boolean
@@ -31,36 +34,50 @@ jobs:
           python-version: '3.11'
 
       # ---------- 发行说明 ----------
-      # 从 CHANGELOG.md 里抓「版本号完全相同」的那一节（写到下一个 ## 标题为止）。
-      # 抓不到也不会让发版失败，只在正文里写一句提示。
+      # 从 CHANGELOG.md 里抓一节当正文，按这个顺序找：
+      #   1. 标题和版本号完全相同的（## v1.0.0）
+      #   2. ## 未发布 / ## Unreleased
+      # 所以平时只要往「未发布」里追加一行，发版时忘了改标题也能用。
+      # 都找不到也不会让发版失败，只在正文里写一句提示。
       - name: 组装发行说明
         shell: pwsh
         run: |
           $ver  = "${{ inputs.version }}".Trim()
           $prev = (git describe --tags --abbrev=0 --match 'v*' 2>$null)
-          $body = @()
+          $text = ''
+          $used = ''
 
           if (Test-Path CHANGELOG.md) {
-            $picked = @()
-            $inside = $false
+            # 先把每一节都读出来
+            $sections = [ordered]@{}
+            $current = $null
             foreach ($line in (Get-Content CHANGELOG.md -Encoding UTF8)) {
-              if ($line -match '^##\s+') {
-                if ($inside) { break }
-                $inside = (($line -replace '^##\s+', '').Trim() -eq $ver)
+              if ($line -match '^##\s+(.+)$') {
+                $current = $matches[1].Trim()
+                $sections[$current] = @()
                 continue
               }
-              if ($inside) { $picked += $line }
+              if ($current) { $sections[$current] += $line }
             }
-            $text = ($picked -join "`n").Trim()
-            if ($text) {
-              $body += "## 更新内容"
-              $body += ""
-              $body += $text
+
+            foreach ($key in @($ver, '未发布', 'Unreleased')) {
+              if ($sections.Contains($key)) {
+                # 先剥掉 HTML 注释再判断有没有内容 ——「未发布」那一节平时只放
+                # 一句说明用的注释，不剥掉的话它会被当成正文（markdown 里看不见，
+                # 但会占着位置，让"这版没写说明"走不到下面的提示）
+                $candidate = (($sections[$key] -join "`n") -replace '(?s)<!--.*?-->', '').Trim()
+                if ($candidate) { $text = $candidate; $used = $key; break }
+              }
             }
           }
 
-          if ($body.Count -eq 0) {
-            $body += "本次没有在 CHANGELOG.md 里找到 $ver 的说明。"
+          $body = @()
+          if ($text) {
+            $body += "## 更新内容"
+            $body += ""
+            $body += $text
+          } else {
+            $body += "本次没有在 CHANGELOG.md 里找到 $ver（或「未发布」）的说明。"
           }
 
           $body += ""
@@ -72,7 +89,7 @@ jobs:
           $body += "**下载**：见下方 Assets。"
 
           $body -join "`n" | Set-Content RELEASE_BODY.md -Encoding UTF8
-          Write-Host "---- 发行说明 ----"
+          Write-Host "---- 发行说明（取自 CHANGELOG.md 的「$used」一节） ----"
           Get-Content RELEASE_BODY.md
 
       - name: Install deps
@@ -80,19 +97,47 @@ jobs:
           python -m pip install --upgrade pip
           pip install PyQt6 pyinstaller
 
+      # exe 的「属性 → 详细信息」里显示的版本号/产品名来自这个文件。
+      # 用发版输入的那个 tag 生成，这样属性里显示的就是 GitHub 上那个版本号。
+      - name: 生成版本信息
+        run: python tools/make_version_info.py version_info.txt --version "${{ inputs.version }}"
+
       # 注意：windows 上默认 shell 是 pwsh，`^` 不是续行符（那是 cmd 的写法），
       # 写成多行会让 pyinstaller 丢参数并把 main.py 当成一条独立命令。必须单行。
-      - name: Build
-        run: pyinstaller --noconfirm --windowed --name MCLuncher --add-data "assets;assets" main.py
+      - name: Build (onedir)
+        run: pyinstaller --noconfirm --windowed --name Mosslight-Launcher --icon assets/icons/icon512.ico --version-file version_info.txt --add-data "assets;assets" main.py
+
+      # 单文件版：给"就要一个 exe、不想解压"的人。
+      # ⚠️ 代价是**每次启动**都要把整个包解到临时目录再跑 ——
+      # 冷启动 5~10 秒，之后靠系统文件缓存才是 1~2 秒；崩溃时还会残留临时目录。
+      # 所以两种都发，让用户自己挑（zip 那个每次启动都是 ~1 秒）。
+      #
+      # --runtime-tmpdir=. ：不要解到 %TEMP%，改成解在**启动器所在目录**
+      # （`.` 是相对引导器启动时的当前目录；双击 exe 时它就是 exe 所在目录），
+      # 学 PCL 那种"文件都在自己旁边"的样子。
+      # ⚠️ 用 `.` 而不是起个漂亮名字的子目录：**PyInstaller 不会替你创建父目录**，
+      #    指定的目录不存在就直接报 "cannot create temporary directory" 起不来。
+      #    里面那层 `_MEIxxxxxx` 是引导器写死的名字，改不了。
+      # ⚠️ 另外：只读目录（Program Files）、或者用"起始位置"指向别处的快捷方式，
+      #    都可能让解压失败 —— 所以 zip 那个才是推荐下载。
+      # --distpath/--workpath 都跟上面那次分开：同名两次构建共用一个中间目录
+      # 有可能复用到上一次的分析结果（onefile 和 onedir 的最终步骤不一样）。
+      - name: Build (onefile)
+        run: pyinstaller --noconfirm --windowed --onefile --name Mosslight-Launcher --icon assets/icons/icon512.ico --version-file version_info.txt --add-data "assets;assets" --runtime-tmpdir=. --distpath dist-onefile --workpath build-onefile main.py
 
       - name: Zip
-        run: Compress-Archive -Path dist/MCLuncher/* -DestinationPath MCLuncher-${{ inputs.version }}-win64.zip
+        run: Compress-Archive -Path dist/Mosslight-Launcher/* -DestinationPath Mosslight-Launcher-${{ inputs.version }}-win64.zip
+
+      - name: 给单文件版改名（带上版本号）
+        run: Rename-Item dist-onefile/Mosslight-Launcher.exe Mosslight-Launcher-${{ inputs.version }}-onefile.exe
 
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.version }}
-          name: "MC Launcher ${{ inputs.version }}"
+          name: "Mosslight Launcher ${{ inputs.version }}"
           body_path: RELEASE_BODY.md
           prerelease: ${{ inputs.prerelease }}
-          files: MCLuncher-${{ inputs.version }}-win64.zip
+          files: |
+            Mosslight-Launcher-${{ inputs.version }}-win64.zip
+            dist-onefile/Mosslight-Launcher-${{ inputs.version }}-onefile.exe
