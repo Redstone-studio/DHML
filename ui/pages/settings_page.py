@@ -90,6 +90,7 @@ class SettingsPage(TranslatableWidget):
 
         layout.addWidget(self._make_java_card())
         layout.addWidget(self._make_memory_card())
+        layout.addWidget(self._make_download_card())
         layout.addWidget(self._make_misc_card())
         layout.addWidget(self._make_about_card())
         layout.addStretch()
@@ -110,6 +111,8 @@ class SettingsPage(TranslatableWidget):
         self._refresh_memory_bar()
         self._refresh_config_hint()
         self._refresh_subtitle()
+        # 下载那条的说明也是生成的（里面有线程数）
+        self._refresh_thread_controls()
 
     def _refresh_subtitle(self):
         self.subtitle.setText(
@@ -419,6 +422,84 @@ class SettingsPage(TranslatableWidget):
         row.addStretch()
         box.addLayout(row)
         return sw
+
+    # ---------- 下载 ----------
+
+    def _make_download_card(self):
+        """多线程下载：开关 + 线程数（移植自 experiments/Downloading mod test）
+
+        ⚠️ 语义照搬实验那边：开关是"用不用我自己设的线程数"，
+        **关着不是单线程**，而是用默认的 DEFAULT_THREADS 个。
+        所以关掉的时候滑块置灰 + 底下写清楚现在实际用几个，
+        免得用户以为关掉就变成 1 个线程了。
+        """
+        card, box = self._card("下载")
+
+        self.thread_hint = QLabel()
+        self.thread_hint.setObjectName("HintText")
+        self.thread_hint.setWordWrap(True)
+
+        self.multi_thread_switch = self._switch_row(
+            box, self.label("使用自定义下载线程数", "FieldLabel"),
+            config.get("multi_thread", False), self._on_multi_thread_changed)
+
+        from core.config import DEFAULT_THREADS, THREAD_RANGE
+        low, high = THREAD_RANGE
+        slider_row = QHBoxLayout()
+        slider_row.setSpacing(10)
+        slider_row.addWidget(self.label("线程数", "FieldLabel"))
+
+        self.thread_slider = QSlider(Qt.Orientation.Horizontal)
+        self.thread_slider.setObjectName("MemorySlider")
+        self.thread_slider.setRange(low, high)
+        self.thread_slider.setSingleStep(1)
+        self.thread_slider.setPageStep(4)
+        self.thread_slider.setTickInterval(4)
+        self.thread_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        # ⚠️ 先 setValue 再 connect：不然初始化那一下会被当成"用户拖了"，写一次配置
+        self.thread_slider.setValue(int(config.get("download_threads",
+                                                   DEFAULT_THREADS)))
+        self.thread_slider.valueChanged.connect(self._on_threads_changed)
+        slider_row.addWidget(self.thread_slider, 1)
+
+        self.thread_value = QLabel()
+        self.thread_value.setObjectName("FieldLabel")
+        self.thread_value.setFixedWidth(70)
+        self.thread_value.setAlignment(Qt.AlignmentFlag.AlignRight
+                                       | Qt.AlignmentFlag.AlignVCenter)
+        slider_row.addWidget(self.thread_value)
+        box.addLayout(slider_row)
+
+        box.addWidget(self.thread_hint)
+        self._refresh_thread_controls()
+        return card
+
+    def _refresh_thread_controls(self):
+        """开关状态 + 滑块可用性 + 那句"实际用几个线程"的说明"""
+        from core.config import DEFAULT_THREADS, effective_threads
+        on = bool(config.get("multi_thread", False))
+        self.thread_slider.setEnabled(on)
+        self.thread_value.setText(str(self.thread_slider.value()))
+        if on:
+            self.thread_hint.setText(tr(
+                "开得越多下载越快，但太吃网络和磁盘；8~16 一般就够了。"
+                "当前用 {n} 个线程。", n=effective_threads()))
+        else:
+            self.thread_hint.setText(tr(
+                "关着的时候用默认的 {d} 个线程（不是单线程）。"
+                "当前用 {n} 个线程。", d=DEFAULT_THREADS, n=effective_threads()))
+
+    def _on_multi_thread_changed(self, checked: bool):
+        if self._loading:
+            return
+        config.set("multi_thread", bool(checked))
+        self._refresh_thread_controls()
+
+    def _on_threads_changed(self, value: int):
+        if self._loading:
+            return
+        config.set("download_threads", int(value))
+        self._refresh_thread_controls()
 
     def _make_misc_card(self):
         card, box = self._card("其他")

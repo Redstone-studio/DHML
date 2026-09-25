@@ -276,6 +276,21 @@ def main() -> int:
                 print(f"   {key}")
             print()
 
+        # 值跟键一模一样 = 值还是中文原文（zh_CN 是 key -> 中文，所以相等就是没翻）。
+        # ⚠️ 只**提示**：有些语言里确实同形（繁体的 "OptiFine 各版本"、日语借词），
+        # 所以措辞是"可能没翻"，别当错误。
+        same_as_source = [
+            key for key in table
+            if key not in NO_TRANSLATE and table[key] == key
+        ]
+        if same_as_source:
+            print(f"== {other.name} 里有 {len(same_as_source)} 条值跟中文原文一样（可能没翻） ==")
+            for key in same_as_source[:15]:
+                print(f"   {key}")
+            if len(same_as_source) > 15:
+                print(f"   …还有 {len(same_as_source) - 15} 条")
+            print()
+
     if args.write and (missing or unused):
         # 以源码为准重建：补上缺的、去掉没人用的，顺序按源码出现顺序
         merged = {text: current.get(text, text) for text in found}

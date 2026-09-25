@@ -97,6 +97,9 @@ class MainWindow(QMainWindow):
             lambda: self.switch_page("accounts"))
         # 那边改了 Java / 内存：启动面板上那行元信息要跟着刷新
         version_settings_page.saved.connect(self.pages["home"].refresh_panel)
+        # 下载页装完一个版本 → 版本列表和启动面板都要重扫
+        download_page = self.pages["download"]
+        download_page.installed.connect(self._on_installed)
 
         # 主题和语言改到"个性化"页了
         personalize = self.pages["personalize"]
@@ -130,6 +133,10 @@ class MainWindow(QMainWindow):
         # 切到版本页 / 启动页时刷新一下（版本列表和面板上的信息都来自扫描）
         if key in ("versions", "home"):
             page.reload_versions()
+
+    def _on_installed(self):
+        """装完一个新版本：跟"改了游戏目录"一样，重扫所有跟版本相关的页面"""
+        self._on_config_changed()
 
     def _on_version_activated(self, version: dict):
         """版本页里双击（或回车）了一个版本：回启动页
@@ -231,9 +238,16 @@ class MainWindow(QMainWindow):
         然后三步替换：
           1. @ICONS@ → 图标目录的绝对路径（Qt 的 url() 相对路径是按工作目录解析的，
                        打包后工作目录一变就找不到图）
-          2. @变量@  → core/theme.py 里对应主题的实际颜色
+          2. @ICONS_SUFFIX@ → 主题相关的图标后缀（深色主题是空串、浅色是 "-light"）
+                       ⚠️ Qt 的 SVG **不支持 currentColor**，颜色只能写死在文件里，
+                       所以每个要在 QSS 里用的图标都得有 `-dark` / `-light` 两份
+                       （见 ui/icons.py 里同一套约定）
+          3. @变量@  → core/theme.py 里对应主题的实际颜色
         最后检查有没有漏网的变量 —— 写错名字的话 Qt 会静默忽略那条规则，
         界面会悄悄少个样式，很难查。
+
+        ⚠️ 这个函数在**主题变化时会被重新调用**（见 _on_system_color_scheme_changed
+        和设置页），所以替换出来的后缀会跟着更新，不用担心换成浅色后还指着深色图标。
         """
         qss = load_stylesheet()
         if not qss.strip():
@@ -241,9 +255,12 @@ class MainWindow(QMainWindow):
             print("[UI] 没读到任何样式片段，检查 assets/styles/")
             return
 
-        qss = qss.replace("@ICONS@", resource_path("assets", "icons").as_posix())
-
         mode = self.current_theme_mode()
+        # ⚠️ 顺序：先 @ICONS@（它只是换路径），再 @ICONS_SUFFIX@。
+        # 反过来的话 `@ICONS_SUFFIX@` 会被先换掉，结果一样，但读起来更容易搞混。
+        qss = qss.replace("@ICONS@", resource_path("assets", "icons").as_posix())
+        # 深色主题的图标就是原名（不带后缀），浅色主题带 -light —— 见上面第 2 条
+        qss = qss.replace("@ICONS_SUFFIX@", "" if mode == "dark" else "-light")
         qss = theme.resolve(qss, theme.palette(mode, config.get("accent_color", "")))
 
         left = theme.unresolved(qss)

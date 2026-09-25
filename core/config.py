@@ -177,7 +177,17 @@ DEFAULT_CONFIG = {
     # 记住用过的 .minecraft 目录（PCL 那种"文件夹列表"）：最近的排前面。
     # 只是方便下次再选，删掉也不影响功能。
     "known_minecraft_dirs": [],
+    # ---------- 多线程下载（移植自 experiments/Downloading mod test 的 appearance）----------
+    # multi_thread 是"用我自己设的线程数"开关。关着 = 用 DEFAULT_THREADS，
+    # 开着才用 download_threads 的值 —— 实验那边就是这么设计的（原注释写着
+    # "先让用户自己开，出问题好定位"），所以这里照搬，别自作主张改成"关=单线程"。
+    "multi_thread": False,
+    "download_threads": 8,     # 1~32，见 THREAD_RANGE
 }
+
+# 下载线程数：范围和默认值。改这里就够，界面和引擎都读它
+THREAD_RANGE = (1, 32)
+DEFAULT_THREADS = 8
 
 THEME_MODES = ("system", "dark", "light")
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -267,6 +277,8 @@ _COERCE = {
     "accent_color": _as_color,
     "last_version": as_str,
     "known_minecraft_dirs": _as_dir_list,
+    "multi_thread": as_bool,
+    "download_threads": as_int,
 }
 
 
@@ -381,3 +393,34 @@ class Config:
 
 # 全局单例
 config = Config()
+
+
+# ---------- 多线程下载 ----------
+# 移植自 experiments/Downloading mod test 的 appearance.effective_threads()：
+# **干活的地方统一读 effective_threads()**，别去读 get_thread_count() ——
+# "开关关着时用哪个值"这个语义只该有一处实现，各处各写一遍迟早不一致。
+
+def get_multi_thread() -> bool:
+    """多线程下载开关（= 用不用用户自己设的线程数）"""
+    return bool(config.get("multi_thread", False))
+
+
+def get_thread_count() -> int:
+    """设置里填的线程数（不管开关开没开，读的都是这个值）"""
+    try:
+        value = int(config.get("download_threads", DEFAULT_THREADS))
+    except (TypeError, ValueError):
+        value = DEFAULT_THREADS
+    low, high = THREAD_RANGE
+    return max(low, min(high, value))
+
+
+def effective_threads() -> int:
+    """**实际该用几个线程** —— 下载页建 DownloadManager 时用这个
+
+    开关关着 → DEFAULT_THREADS（不是 1：见 DEFAULT_CONFIG 里的说明），
+    开着 → 用户设的值（1~32 夹紧，填错也不至于开 500 个线程）。
+    """
+    if not get_multi_thread():
+        return DEFAULT_THREADS
+    return get_thread_count()

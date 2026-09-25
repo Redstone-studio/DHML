@@ -104,6 +104,14 @@ _TYPE_ICONS = {
 
 def version_icon_name(version: dict) -> str:
     """这个版本该用哪张内置图（没有对应图就返回空串）"""
+    # 愚人节版用金块（用户 2026-09 要求）。清单的 type 里没有这一类，
+    # 所以只能按名单认 —— 跟 core/versions_remote.py 用的是同一份名单。
+    try:
+        from core.versions_remote import april_fools_years
+        if version.get("id", "") in april_fools_years():
+            return "GoldBlock"
+    except Exception:
+        pass        # 名单读不出来就当不是愚人节版，不影响别的版本
     # 整合包排在加载器前面：右边的标签已经写了加载器名，图标用箱子能多带一点信息
     if version.get("kind") == "pack":
         return "pack"
