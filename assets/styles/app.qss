@@ -19,8 +19,13 @@
      warn / danger / pack_*                           语义色
    ============================================================================ */
 
+/* ⚠️ 这里**必须是 transparent**，不能填 @bg_page@：
+   主窗口最底下铺了一层背景画布（ui/widgets/background_canvas.py，移植自
+   实验项目），页面自己再填一层不透明底色的话，用户设的背景图会被整个盖住
+   —— 实验项目踩过这个坑（它的使用说明第 8 节第 6 条）。
+   没设背景图时画布画的就是 @bg_page@（当前主题的页面色），所以观感不变。 */
 QWidget {
-    background-color: @bg_page@;
+    background-color: transparent;
     color: @text@;
     font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei",
                  "Segoe UI Symbol", "Segoe UI Emoji", sans-serif;
@@ -39,8 +44,15 @@ QRadioButton {
     background-color: transparent;
 }
 
-QMainWindow, #Root {
-    background-color: @bg_window@;
+/* 主窗口这层**要留一个不透明底色**（用页面色）：
+   背景图的铺法是「居中 / 适应」时，图以外的地方画布是不画的 —— 那圈留白
+   露出来的就是这层。露成黑色或者穿到桌面都很难看（实测漏掉这条就是纯黑）。
+   `#Root` 保持透明：它盖在画布上面，填色的话背景图就被盖掉了。 */
+QMainWindow {
+    background-color: @bg_page@;
+}
+#Root {
+    background-color: transparent;
 }
 
 QToolTip {
@@ -157,8 +169,12 @@ QToolTip {
     font-size: 13px;
 }
 
-/* 卡片 */
-#Card {
+/* 卡片。
+   ⚠️ `#DownloadNavCard` 是下载页左边那列分类栏：它长得跟卡片一样（共用这条），
+   但它是**外壳** —— 设了背景图时它会跟着左侧竖栏一起半透明，不跟"卡片透明度"
+   那一档走（见 ui/widgets/card_style.py 的 chrome_stylesheet）。 */
+#Card,
+#DownloadNavCard {
     background-color: @bg_card@;
     border: 1px solid @border@;
     border-radius: 12px;

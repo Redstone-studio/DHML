@@ -19,3 +19,106 @@ QMessageBox QLabel {
     color: @text@;
 }
 
+/* ==================== 动效设置对话框 ====================
+   ui/dialogs/anim_settings_dialog.py。
+   标题 / 说明文字复用 #DialogTitle / #HintText / #FieldLabel，
+   这里只补它独有的几块：预设列表、预览框、说明行、速度档。 */
+
+/* 左边那列动效预设。全局 QListWidget 是透明的（见 20-inputs.qss），
+   这里给它一块卡片底，和右边的预览区拉开层次 */
+#AnimPresetList {
+    background-color: @bg_card@;
+    border: 1px solid @border@;
+    border-radius: 10px;
+    padding: 4px;
+    font-size: 13px;
+}
+
+/* 预览区：比卡片底再深一层（页面色），示意卡片才浮得出来 */
+#PreviewBox {
+    background-color: @bg_window@;
+    border: 1px solid @border@;
+    border-radius: 10px;
+}
+
+/* 选中预设的那段说明（名称 + 方向/时长/错峰/位移） */
+#AnimDetail {
+    color: @text_secondary@;
+    font-size: 12px;
+}
+
+/* 速度档：五档竖着排，比全局 QRadioButton（padding 9px 11px）紧凑一点
+   才放得下；颜色仍然走主题，选中态用强调色一族 */
+#SpeedOption {
+    color: @text_secondary@;
+    font-size: 12px;
+    padding: 2px 6px;
+    spacing: 8px;
+}
+#SpeedOption:checked {
+    color: @accent_text_strong@;
+    background-color: @accent_bg@;
+    border-color: @accent_border@;
+}
+
+/* ==================== 滑块（背景设置对话框） ====================
+   ⚠️ 全部挂在 `#SettingSlider` 上，**不写裸 QSlider**：个性化页那三个
+   调色滑块没有自己的样式，裸规则会顺带把它们也改掉（那是别的页面的事）。
+   内存滑块有自己的 `#MemorySlider`（见 50-memory.qss），不受影响。
+   浅色主题下 groove 不走 @border@ 的话会发白，所以这里也要给颜色。 */
+#SettingSlider::groove:horizontal {
+    height: 4px;
+    background-color: @border@;
+    border-radius: 2px;
+}
+#SettingSlider::sub-page:horizontal {
+    background-color: @accent@;
+    border-radius: 2px;
+}
+#SettingSlider::sub-page:horizontal:disabled {
+    background-color: @border_control@;
+}
+#SettingSlider::handle:horizontal {
+    background-color: @accent@;
+    width: 12px;
+    margin: -5px 0;
+    border-radius: 6px;
+}
+#SettingSlider::handle:horizontal:hover {
+    background-color: @accent_text@;
+}
+#SettingSlider::handle:horizontal:disabled {
+    background-color: @text_disabled@;
+}
+
+/* 滑块旁边那个数字（压暗 / 卡片透明度 / 线程数） */
+#ValueLabel {
+    color: @text_dim@;
+    font-size: 12px;
+}
+
+/* ==================== 可收起区块的标题栏 ====================
+   ui/widgets/collapsible_section.py。原先这个控件自己在代码里
+   setStyleSheet 写死了一套深色（#232428 / #e9e9ec / #2e3034 / #5ec269）——
+   控件级样式表压过 app.qss，浅色主题下会变成一根深色横条。
+   现在只留 objectName，颜色全走主题变量（和 #ModGroupHeader 同一套观感）。
+   ⚠️ QToolButton 的文字**永远居中**（text-align 对它不生效），
+   这里靠左边那个箭头图标提示"可以展开"。 */
+#SectionToggle {
+    background-color: @bg_card@;
+    border: 1px solid @border@;
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: @text@;
+    font-size: 13px;
+}
+#SectionToggle:hover {
+    background-color: @bg_elevated@;
+    border-color: @accent@;
+    color: @accent@;
+}
+#SectionToggle:checked {
+    background-color: @bg_card@;
+    border-color: @border_control@;
+}
+

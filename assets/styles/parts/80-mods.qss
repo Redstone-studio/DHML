@@ -24,33 +24,12 @@
     font-weight: bold;
 }
 
-/* ---------- 类型标签栏（模组 / 整合包 / 数据包 / 资源包 / 光影包）----------
-   选中态用 `:checked`（代码里只 setCheckable + setChecked，不写死颜色）。
-   ⚠️ 用 QPushButton：QToolButton 的文字强制居中，标签栏要左起排列。 */
-#ModTypeTab {
-    background-color: @bg_control@;
-    border: 1px solid @border_control@;
-    border-radius: 7px;
-    color: @text_dim@;
-    padding: 6px 14px;
-    font-size: 12px;
-}
-#ModTypeTab:hover {
-    background-color: @bg_hover@;
-    color: @text_bright@;
-    border-color: @border_hover@;
-}
-/* ⚠️ 顺序：`:checked` 写在 `:hover` **后面**，否则选中的那个悬停时会掉绿 */
-#ModTypeTab:checked {
-    background-color: @accent_fill@;
-    border-color: @accent@;
-    color: @on_accent@;
-    font-weight: bold;
-}
-#ModTypeTab:checked:hover {
-    background-color: @accent_fill_hover@;
-    border-color: @accent@;
-}
+/* ---------- 类型标签栏：**已删除**（用户 2026-09）----------
+   顶部那排「模组 / 整合包 / 数据包 / 资源包 / 光影包」跟左栏「社区资源」下的
+   同一组入口重复，已经去掉（见 `mods_page._make_filter_panel`）。
+   这里的 `#ModTypeTab` 五条规则跟着一起删了 —— 留着是死样式，而且会让人以为
+   界面上还有这么一排东西。以后要加回来：把规则从这份文件的历史里捞回来，
+   `mods_page` 里 `self._type_buttons` 的循环也还留着（清空成空字典了）。 */
 
 /* ---------- 搜索结果卡片 ---------- */
 #ModCard {

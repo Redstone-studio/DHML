@@ -302,15 +302,27 @@ QScrollArea > QWidget > QWidget {
 #CollapsibleHeader[selected="true"] #CollapsibleHeaderNote {
     color: @accent_text@;
 }
-#CollapsibleBody, #RemoteVersionRow {
+/* 折叠组的标题栏（见上面那段），展开出来的**行本身要有一块底色**。
+   ⚠️ 这一条按用户的两次反馈改过（方向是反的，别当成"谁改错了"）：
+   最早行是"扁平无框"的（用户当时明确要的，理由见上面那段），没设背景图时
+   也确实更清爽 —— 但**设了背景图之后行是直接浮在图上的**：文字和图标跟背景
+   糊在一起读不清（用户 2026-09 发的截图里一眼就能看到）。
+   现在照实验项目的做法给每行一块底色（它那边 `version_card_qss` 就是每行一张卡）。
+   底色用比标题栏**暗一级**的页面色，保留"标题是卡、行是列表"的层次。
+   ⚠️ 行距也要跟着放大（`CollapsibleGroup` 里 body_box 的 spacing）：扁平行挨着
+   排没问题，一块块卡片挨着排就成一大坨了。 */
+#CollapsibleBody {
     background-color: transparent;
     border: none;
 }
 #RemoteVersionRow {
+    background-color: @bg_page@;
+    border: 1px solid @border@;
     border-radius: 8px;
 }
 #RemoteVersionRow:hover {
     background-color: @bg_elevated@;
+    border-color: @border_control@;
 }
 /* 用户**已经选中**的那一行（安装选项页里挑加载器版本）。
    ⚠️ 选了哪一行必须能一眼看出来，而且不能只靠悬停色 —— 悬停色鼠标一移开
