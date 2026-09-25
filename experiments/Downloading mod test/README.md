@@ -186,10 +186,10 @@ python main.py
 我们搜的是 **Modrinth**，用户想看的是 **MC 百科**，两边**没有任何共享 ID**，
 名字也不完全一样（Modrinth 叫 "Fabric API"，百科词条叫 "FabricAPI"）。
 
-**Modrinth 的接口帮不上忙**（实测）：
+~~**Modrinth 的接口帮不上忙**（实测）：~~
 
-- `project.wiki_url` 指的是**项目自己的 wiki**（`fabricmc.net/wiki`、GitHub wiki 那种），不是百科
-- 搜索接口的 hit 里连 `wiki_url` 字段都没有
+- ~~`project.wiki_url` 指的是**项目自己的 wiki**（`fabricmc.net/wiki`、GitHub wiki 那种），不是百科~~
+- ~~搜索接口的 hit 里连 `wiki_url` 字段都没有~~
 
 **MC 百科的官方 API 也走不通**：`api.mcmod.cn` 一律返回 **403**，文档站也要权限，是私有的。
 
